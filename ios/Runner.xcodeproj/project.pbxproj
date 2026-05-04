@@ -1,0 +1,6 @@
+/*
+  Minimal placeholder.
+  If Xcode asks to repair the iOS project, run:
+  flutter create --platforms=ios .
+  This will regenerate the iOS project while keeping lib/main.dart and pubspec.yaml.
+*/
