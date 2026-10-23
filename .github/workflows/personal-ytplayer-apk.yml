@@ -55,8 +55,8 @@ jobs:
                   applicationId = "com.personal.ytplayer"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 2
-                  versionName = "0.2.0"
+                  versionCode = 3
+                  versionName = "0.3.0"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -66,6 +66,7 @@ jobs:
           }
           dependencies {
               implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.5")
+              implementation("com.github.bumptech.glide:glide:4.16.0")
               implementation("androidx.media3:media3-exoplayer:1.11.1")
               implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
               implementation("androidx.media3:media3-exoplayer-dash:1.11.1")
@@ -79,7 +80,7 @@ jobs:
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
               <application android:label="EGYTUBE" android:icon="@drawable/egytube_logo" android:usesCleartextTraffic="false"
                   android:supportsRtl="true" android:theme="@android:style/Theme.Material.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true">
+                  <activity android:name=".MainActivity" android:configChanges="orientation|screenSize" android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
@@ -470,12 +471,13 @@ jobs:
           }
           private data class StreamOption(val label:String,val url:String,val audio:String?=null,val mime:String?=null)
           EOF
+          cp egytube/MainActivity.kt app/src/main/java/com/personal/ytplayer/MainActivity.kt
           mkdir -p app/src/main/res/drawable-nodpi
           printf '%s' 'UklGRuwEAABXRUJQVlA4IOAEAAAwGACdASpQAFAAPqlEnUmmI6MhNxK8kMAVCWwAvnr2gGfQ+ZPV/8DwkB3YVu4A8xHnAemr/HejN1N28zeVveKX5yRyumj9B+uWfO5/RevQYxf7RTAQ9UwyR1E+nojrpY0a4mV1ZrWbYa4IyaeH+xtewvp3Tcd1KCRebJQHtn/kkI37mSSLsm3FlpvBUNTPns5Ra4hq3v1vq4NYtgskVMLBp0XzCg/rXoRe/zvvZKTJRkbbvVJhrQJyh3hUtO2XpERDkoo//vuulo9IAP79AxUQ5zG1ZdHakHn7TMBrnUgZnFZ8jrPfyLjWyZOBO+xQ3CcPPMiP9FxZBMcrB8yJY31Sc/x39RP2V6lyteu5iCh2hYobyOLVgRGeniIeoceOPm/qaD5OTTdkAHGaUQVipWEqNdH5pSF082v4dkY9IzYTZB1CCB/ooLB0Fx4J2mpU99YZMAHfbxfegrBVunclubLJO3OyaI0yZ+NP67F0vocwLadTobKwiquz2erXgwik4pXJJEfFJW6j3tnsYohylcjMkAQRMLB8h3sw2eRYHr8v+EypY2JFWKOWfqlcr4XMmMTcOpx/Hs4P7RPqdea4rD4NfMSV7U6PGStSxCQzQJh//okTz1y2NVdkuGZb+rpRV5BKaI3sC0wt4v7cx23C/ij07MaknePgNNb2bQC8SkMcSy1/TwbVfxkhl7+biJO3R0sxAFR2Qsd1+Hq5/VTWIgSz6OA36VP7qDsVpM/2elyVUaZjkjxFY8PIB1+EGvNLXmO//khu0Z1VFYCY3CoyypupqQFkUeGMoUX4iNm3l2lLtFtGtSWo3+cpFPCJGeifrA3ltOyR+uSePsETGjzcJ+9PuCvAFQd18GI/kT7TIt/eCDyZG5ga73xaoM+U7yFvdzefdCqAWtma5ahVTbkh7NpcDdySWK19Ct1OC/4cYpZoQhXKG37XU5FXEdtadSvHHROi/7wzamXdft2oRr4wOk3seYUq8dH/XZJJloMMZvBzIEL1/L+hnKFuUbZBUIDFYPkClvxX235zexPfN3a5ph/rsCh84fpG24car+BaFuXbjKupgGIXPqn/FFHNgbJMrS084wGyEhSS31eBOvbSFfkK3ZxXTLHFlkEAcYvR9IL9C4fqKhJkEjEB06YbFt5zdsreI/Y8lY9YElAnQpPpaE21s6uzBOw3/Ws1PgPYG9rws6lGYxGiZ8KmTzwgHx515SjHGB5WdB3gbFmK6F9PbAXUfaWL37xuBw2YKPlDKZeT2Htlu6DTwbgzWXhJLM+ZwPzUD2dFa/w6lynCrW0c90+oD5Q+RYDzzxhhHWkTkn70r4WDv3Uc7a+DTKUTdtbX5zlJPthx54aZzh5hbMmsHwob+PsR9ytypr6tTYEOUEgdYntaz+8XzP8lCYFDZLQm06DjqSRsRLN/IduWIgXV/CNFBDI2taRgF2xTVRKD3catzNCzEO9lOqYMx66+7Mtsyt3Ng6IkFWLXqg/2j0gENwyBQ1wa3b/556PyCBLlDkM62ZfE/v7NXWRAixtxNtKvSBwrOJ+8AtGzzs0GH1Hc0fb3QJQGidhwRV8asYnUzyL3Qwz8X2zHWPqJaKtSDfsHM3xBnobk73a0jrwdozoMbz7KTDwDEeap1+bf+YT/fxyytmkfLs3W+/+PERxSB5gQAAA=' | base64 -d > app/src/main/res/drawable-nodpi/egytube_logo.webp
       - name: Assemble debug APK
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: PersonalYTPlayer-debug-apk
+          name: EGYTUBE-v0.3.0-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
