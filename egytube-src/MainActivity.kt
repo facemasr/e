@@ -581,7 +581,7 @@ class MainActivity:Activity() {
     }
     private fun showMenu() {
         android.app.AlertDialog.Builder(this).setTitle("EGYTUBE")
-            .setItems(arrayOf("الرئيسية","البحث","اختيار البلد","المشاهدة لاحقًا","الترتيب","النوع")){_,n->
+            .setItems(arrayOf("الرئيسية","البحث","اختيار البلد","المشاهدة لاحقًا","الترتيب","النوع","التنزيلات")){_,n->
                 when(n) {
                     0 -> loadTrending()
                     1 -> showSearch()
@@ -589,6 +589,7 @@ class MainActivity:Activity() {
                     3 -> showLibrary()
                     4 -> chooseSort()
                     5 -> chooseType()
+                    6 -> DownloadCenter.show(this)
                 }
             }.show()
     }
@@ -618,12 +619,14 @@ class MainActivity:Activity() {
         val terms=getSharedPreferences("egytube_search",0)
             .getString("terms","").orEmpty().split("\n").filter {it.isNotBlank()}
         android.app.AlertDialog.Builder(this).setTitle("مكتبتك")
-            .setItems(arrayOf("المشاهدة لاحقًا ("+urls.size+")","عمليات البحث السابقة")){_,index->
+             .setItems(arrayOf("المشاهدة لاحقًا ("+urls.size+")","عمليات البحث السابقة","إدارة التنزيلات")){_,index->
                 if(index==0) {
                     adapter.replaceAll(matches)
                     sectionTitle.text="المشاهدة لاحقًا"
                     status.text=if(matches.isEmpty()) "لا توجد فيديوهات محفوظة ضمن الصفحة المحمّلة حاليًا."
                         else "فيديوهات محفوظة: "+matches.size
+                } else if(index==2) {
+                    DownloadCenter.show(this)
                 } else {
                     android.app.AlertDialog.Builder(this).setTitle("بحث سابق")
                         .setItems(terms.take(12).toTypedArray()){_,which->
@@ -1082,7 +1085,8 @@ class MainActivity:Activity() {
                         .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                         .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,name)
                     val manager=getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                    manager.enqueue(request)
+                    val downloadId=manager.enqueue(request)
+                    DownloadCenter.remember(this,downloadId,item.title)
                     Toast.makeText(this,"بدأ تنزيل الفيديو إلى مجلد التنزيلات",Toast.LENGTH_LONG).show()
                 }catch(e:Exception){
                     Toast.makeText(this,"تعذّر بدء التنزيل: "+e.javaClass.simpleName,Toast.LENGTH_LONG).show()
