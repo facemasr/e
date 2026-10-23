@@ -1,0 +1,393 @@
+name: Build Personal YT Player APK
+on:
+  push:
+    branches: [personal-ytplayer-apk-build]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: SDK platform
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14'
+      - name: Generate isolated Android project
+        shell: bash
+        run: |
+          mkdir -p app/src/main/java/com/personal/ytplayer
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral(); maven(url = "https://jitpack.io") }
+          }
+          rootProject.name = "PersonalYTPlayer"
+          include(":app")
+          EOF
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.11.1" apply false
+              id("org.jetbrains.kotlin.android") version "2.2.21" apply false
+          }
+          EOF
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+          cat > app/build.gradle.kts <<'EOF'
+          plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
+          android {
+              namespace = "com.personal.ytplayer"
+              compileSdk = 36
+              defaultConfig {
+                  applicationId = "com.personal.ytplayer"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "0.1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          dependencies {
+              implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.5")
+              implementation("androidx.media3:media3-exoplayer:1.11.1")
+              implementation("androidx.media3:media3-exoplayer-hls:1.11.1")
+              implementation("androidx.media3:media3-exoplayer-dash:1.11.1")
+              implementation("androidx.media3:media3-ui:1.11.1")
+          }
+          EOF
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+              <application android:label="مشغلي الشخصي" android:usesCleartextTraffic="false"
+                  android:supportsRtl="true" android:theme="@android:style/Theme.Material.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                      <intent-filter>
+                          <action android:name="android.intent.action.SEND"/>
+                          <category android:name="android.intent.category.DEFAULT"/>
+                          <data android:mimeType="text/plain"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+          cat > app/src/main/java/com/personal/ytplayer/HttpDownloader.kt <<'EOF'
+          package com.personal.ytplayer
+
+          import org.schabi.newpipe.extractor.downloader.Downloader
+          import org.schabi.newpipe.extractor.downloader.Request
+          import org.schabi.newpipe.extractor.downloader.Response
+          import java.net.HttpURLConnection
+          import java.net.URL
+
+          class HttpDownloader : Downloader() {
+              override fun execute(request: Request): Response {
+                  val connection = URL(request.url()).openConnection() as HttpURLConnection
+                  connection.connectTimeout = 18000
+                  connection.readTimeout = 25000
+                  connection.instanceFollowRedirects = true
+                  connection.requestMethod = request.httpMethod()
+                  connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
+                  connection.setRequestProperty("Accept-Encoding", "identity")
+                  request.headers()?.forEach { (name, values) ->
+                      values.forEach { connection.setRequestProperty(name, it) }
+                  }
+                  val payload = request.dataToSend()
+                  if (payload != null && payload.isNotEmpty()) {
+                      connection.doOutput = true
+                      connection.outputStream.use { it.write(payload) }
+                  }
+                  return try {
+                      val code = connection.responseCode
+                      val stream = if (code in 200..399) connection.inputStream else connection.errorStream
+                      val body = if (request.httpMethod().equals("HEAD", true)) "" else stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                      val headers = connection.headerFields.entries.filter { it.key != null }
+                          .associate { it.key!! to it.value.orEmpty() }
+                      Response(code, connection.responseMessage.orEmpty(), headers, body, connection.url.toExternalForm())
+                  } finally {
+                      connection.disconnect()
+                  }
+              }
+          }
+          EOF
+          cat > app/src/main/java/com/personal/ytplayer/MainActivity.kt <<'EOF'
+          package com.personal.ytplayer
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.os.Bundle
+          import android.view.View
+          import android.view.ViewGroup
+          import android.view.inputmethod.EditorInfo
+          import android.widget.*
+          import android.graphics.Color
+          import androidx.media3.common.MediaItem
+          import androidx.media3.common.MimeTypes
+          import androidx.media3.common.PlaybackException
+          import androidx.media3.common.Player
+          import androidx.media3.datasource.DefaultDataSource
+          import androidx.media3.datasource.DefaultHttpDataSource
+          import androidx.media3.exoplayer.ExoPlayer
+          import androidx.media3.exoplayer.hls.HlsMediaSource
+          import androidx.media3.exoplayer.dash.DashMediaSource
+          import androidx.media3.exoplayer.source.MergingMediaSource
+          import androidx.media3.exoplayer.source.MediaSource
+          import androidx.media3.exoplayer.source.ProgressiveMediaSource
+          import androidx.media3.ui.PlayerView
+          import org.schabi.newpipe.extractor.NewPipe
+          import org.schabi.newpipe.extractor.ServiceList
+          import org.schabi.newpipe.extractor.stream.StreamInfo
+          import org.schabi.newpipe.extractor.stream.StreamInfoItem
+          import java.util.concurrent.Executors
+
+          @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+          class MainActivity : Activity() {
+              private val worker = Executors.newSingleThreadExecutor()
+              private lateinit var player: ExoPlayer
+              private lateinit var playerView: PlayerView
+              private lateinit var status: TextView
+              private lateinit var searchRow: LinearLayout
+              private lateinit var searchInput: EditText
+              private lateinit var results: ListView
+              private lateinit var qualities: Spinner
+              private lateinit var title: TextView
+              private val videos = mutableListOf<StreamInfoItem>()
+              private val options = mutableListOf<StreamOption>()
+              private var selected = -1
+              private var qualityReady = false
+              private var currentUrl: String? = null
+              private var requestSequence = 0
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  NewPipe.init(HttpDownloader())
+                  window.statusBarColor = Color.rgb(8,12,20)
+                  window.navigationBarColor = Color.rgb(8,12,20)
+                  val main = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setBackgroundColor(Color.rgb(8,12,20))
+                      setPadding(16,16,16,10)
+                  }
+                  title = TextView(this).apply {
+                      text = "▶ مشغلي الشخصي"
+                      textSize = 23f
+                      setTextColor(Color.WHITE)
+                      setPadding(8,14,8,16)
+                  }
+                  main.addView(title)
+                  searchRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                  searchInput = EditText(this).apply {
+                      hint = "ابحث عن فيديو أو ألصق رابطًا"
+                      textSize = 15f
+                      setSingleLine(true)
+                      setTextColor(Color.WHITE)
+                      setHintTextColor(Color.LTGRAY)
+                      imeOptions = EditorInfo.IME_ACTION_SEARCH
+                  }
+                  val searchBtn = Button(this).apply { text = "بحث" }
+                  searchRow.addView(searchInput, LinearLayout.LayoutParams(0,56.dp(),1f))
+                  searchRow.addView(searchBtn)
+                  main.addView(searchRow)
+                  status = TextView(this).apply {
+                      text = "جاهز للبحث"
+                      setTextColor(Color.LTGRAY)
+                      setPadding(8,12,8,12)
+                  }
+                  main.addView(status)
+                  results = ListView(this).apply {
+                      dividerHeight = 1
+                      setBackgroundColor(Color.rgb(17,22,32))
+                  }
+                  main.addView(results, LinearLayout.LayoutParams(-1,0,1f))
+                  playerView = PlayerView(this).apply { visibility = View.GONE }
+                  main.addView(playerView, LinearLayout.LayoutParams(-1,220.dp()))
+                  qualities = Spinner(this).apply { visibility = View.GONE }
+                  main.addView(qualities, LinearLayout.LayoutParams(-1,56.dp()))
+                  val back = Button(this).apply {
+                      text = "العودة إلى البحث"
+                      visibility = View.GONE
+                      setOnClickListener { showResults() }
+                  }
+                  main.addView(back)
+                  setContentView(main)
+                  player = ExoPlayer.Builder(this).build()
+                  playerView.player = player
+                  player.addListener(object : Player.Listener {
+                      override fun onPlayerError(error: PlaybackException) {
+                          status.text = "تعذّر التشغيل: " + error.errorCodeName
+                      }
+                      override fun onPlaybackStateChanged(playbackState: Int) {
+                          if (playbackState == Player.STATE_READY) status.text = "تشغيل مباشر"
+                      }
+                  })
+                  results.setOnItemClickListener { _,_,position,_ -> loadVideo(videos[position].url, back) }
+                  searchBtn.setOnClickListener { doSearch(back) }
+                  searchInput.setOnEditorActionListener { _, _, _ -> doSearch(back); true }
+                  qualities.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                      override fun onNothingSelected(parent: AdapterView<*>?) {}
+                      override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                          if (qualityReady && selected != position) playOption(position)
+                      }
+                  }
+                  if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+                      searchInput.setText(intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty())
+                      doSearch(back)
+                  }
+              }
+
+              private fun Int.dp(): Int = (this * resources.displayMetrics.density).toInt()
+
+              private fun showResults() {
+                  ++requestSequence
+                  player.stop()
+                  playerView.visibility = View.GONE
+                  qualities.visibility = View.GONE
+                  results.visibility = View.VISIBLE
+                  searchRow.visibility = View.VISIBLE
+                  title.text = "▶ مشغلي الشخصي"
+                  status.text = "اختر فيديو من النتائج"
+                  findViewById<ViewGroup>(android.R.id.content).findViewWithTag<View>("unused")
+                  val content = (playerView.parent as LinearLayout)
+                  content.getChildAt(content.childCount-1).visibility = View.GONE
+              }
+
+              private fun doSearch(back: View) {
+                  val term = searchInput.text.toString().trim()
+                  if (term.isBlank()) return
+                  val link = Regex("https?://(?:www\\.)?(?:m\\.)?(?:youtube\\.com|youtu\\.be)/[^\\s]+",RegexOption.IGNORE_CASE).find(term)?.value
+                  if (link != null) { loadVideo(link, back); return }
+                  val token = ++requestSequence
+                  status.text = "جارٍ البحث..."
+                  worker.execute {
+                      try {
+                          val extractor = ServiceList.YouTube.getSearchExtractor(term)
+                          extractor.fetchPage()
+                          val found = extractor.initialPage.items.filterIsInstance<StreamInfoItem>()
+                          runOnUiThread {
+                              if (isDestroyed || token != requestSequence) return@runOnUiThread
+                              videos.clear()
+                              videos.addAll(found)
+                              results.adapter = ArrayAdapter(this,
+                                  android.R.layout.simple_list_item_1,
+                                  found.map { it.name + "\n" + it.uploaderName.orEmpty() })
+                              status.text = "النتائج: " + found.size.toString()
+                          }
+                      } catch (e: Exception) {
+                          runOnUiThread {
+                              if (token == requestSequence) status.text = "خطأ في البحث: " + (e.message ?: "غير معروف")
+                          }
+                      }
+                  }
+              }
+
+              private fun loadVideo(url: String, back: View) {
+                  val token = ++requestSequence
+                  currentUrl = url
+                  player.stop()
+                  title.text = "جارٍ التحميل..."
+                  results.visibility = View.GONE
+                  searchRow.visibility = View.GONE
+                  playerView.visibility = View.VISIBLE
+                  qualities.visibility = View.VISIBLE
+                  back.visibility = View.VISIBLE
+                  qualityReady = false
+                  selected = -1
+                  status.text = "جارٍ تحليل رابط التشغيل..."
+                  worker.execute {
+                      try {
+                          val info = StreamInfo.getInfo(url)
+                          if (info.ageLimit > 0) throw IllegalStateException("الفيديو مقيّد بالعمر وغير مدعوم.")
+                          val opts = mutableListOf<StreamOption>()
+                          info.videoStreams.filter { it.isUrl && it.content.startsWith("https://") }
+                              .sortedByDescending { it.height }
+                              .forEach { opts.add(StreamOption(it.resolution + " — فيديو وصوت",it.content)) }
+                          val audio = info.audioStreams.filter { it.isUrl && it.content.startsWith("https://") }
+                              .maxByOrNull { it.averageBitrate }
+                          info.videoOnlyStreams.filter { it.isUrl && it.content.startsWith("https://") }
+                              .sortedByDescending { it.height }
+                              .forEach { video ->
+                                  if (audio != null) opts.add(StreamOption(video.resolution + " — فيديو وصوت منفصل",video.content,audio.content))
+                              }
+                          if (!info.hlsUrl.isNullOrBlank()) opts.add(StreamOption("HLS تلقائي",info.hlsUrl,null,MimeTypes.APPLICATION_M3U8))
+                          if (!info.dashMpdUrl.isNullOrBlank()) opts.add(StreamOption("DASH تلقائي",info.dashMpdUrl,null,MimeTypes.APPLICATION_MPD))
+                          runOnUiThread {
+                              if (isDestroyed || token != requestSequence) return@runOnUiThread
+                              title.text = info.name
+                              options.clear()
+                              options.addAll(opts)
+                              if (opts.isEmpty()) {
+                                  status.text = "لم يُعثر على مصدر تشغيل متاح."
+                              } else {
+                                  qualities.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, opts.map { it.label })
+                                  qualityReady = true
+                                  playOption(0)
+                              }
+                          }
+                      } catch (e: Exception) {
+                          runOnUiThread {
+                              if (token == requestSequence) status.text = "تعذّر استخراج الفيديو: " + (e.message ?: "غير معروف")
+                          }
+                      }
+                  }
+              }
+
+              private fun playOption(index: Int) {
+                  if (index !in options.indices) return
+                  val previousTime = if (selected < 0) 0L else player.currentPosition
+                  selected = index
+                  val o = options[index]
+                  val factory = DefaultDataSource.Factory(this, DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true))
+                  fun mp4(url: String): MediaSource = ProgressiveMediaSource.Factory(factory).createMediaSource(MediaItem.fromUri(url))
+                  val media = when {
+                      o.mime == MimeTypes.APPLICATION_M3U8 -> HlsMediaSource.Factory(factory).createMediaSource(MediaItem.Builder().setUri(o.url).setMimeType(MimeTypes.APPLICATION_M3U8).build())
+                      o.mime == MimeTypes.APPLICATION_MPD -> DashMediaSource.Factory(factory).createMediaSource(MediaItem.Builder().setUri(o.url).setMimeType(MimeTypes.APPLICATION_MPD).build())
+                      o.audio != null -> MergingMediaSource(mp4(o.url), mp4(o.audio))
+                      else -> mp4(o.url)
+                  }
+                  status.text = "تشغيل: " + o.label
+                  player.setMediaSource(media)
+                  player.prepare()
+                  if (previousTime > 0) player.seekTo(previousTime)
+                  player.playWhenReady = true
+                  if (qualities.selectedItemPosition != index) qualities.setSelection(index)
+              }
+              override fun onBackPressed() {
+                  if (playerView.visibility == View.VISIBLE) showResults() else super.onBackPressed()
+              }
+              override fun onDestroy() {
+                  playerView.player = null
+                  player.release()
+                  worker.shutdownNow()
+                  super.onDestroy()
+              }
+          }
+          private data class StreamOption(val label:String,val url:String,val audio:String?=null,val mime:String?=null)
+          EOF
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PersonalYTPlayer-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
