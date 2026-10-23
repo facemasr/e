@@ -1018,13 +1018,16 @@ class MainActivity:Activity() {
         panel.setTitle(model.title)
         panel.setSubtitle(model.channel)
         webResults.visibility=View.GONE
-        list.visibility=View.VISIBLE
+        list.visibility=if(playingSiteMedia)View.GONE else View.VISIBLE
         panel.player.stop()
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
         playerDetails.removeAllViews()
-        watchNotice=baseText("جارٍ تجهيز الفيديو...",12f,false,Palette.SECOND).apply {
-            setPadding(0,dp(5),0,dp(9))
+        // Error notices are displayed only if playback actually fails.
+        // Avoid permanent loading/status messages under the action buttons.
+        watchNotice=baseText("",12f,false,Palette.SECOND).apply {
+            visibility=View.GONE
+            setPadding(0,dp(5),0,dp(6))
         }
         val name=baseText(model.title,18f,true).apply { maxLines=3 }
         playerDetails.addView(name)
@@ -1049,42 +1052,18 @@ class MainActivity:Activity() {
             LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
         actions.addView(row)
         playerDetails.addView(actions,LinearLayout.LayoutParams(-1,dp(62)))
-        val relatedChips=HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled=false
-        }
-        val relatedRow=LinearLayout(this).apply {
-            orientation=LinearLayout.HORIZONTAL
-            layoutDirection=View.LAYOUT_DIRECTION_RTL
-            setPadding(0,dp(8),0,dp(8))
-        }
-        fun relatedTab(label:String,filter:(VideoModel)->Boolean) {
-            relatedRow.addView(clickable(label,{
-                val matching=cachedVideos.filter(filter).filter{it.url!=model.url}
-                adapter.replaceAll(matching.ifEmpty {cachedVideos.filter{it.url!=model.url}})
-                status.text=label+" • "+adapter.itemCount+" فيديو"
-            }),LinearLayout.LayoutParams(-2,dp(36)).apply {rightMargin=dp(8)})
-        }
-        relatedTab("الكل"){true}
-        relatedTab("من القناة"){it.channel.isNotBlank() && it.channel==model.channel}
-        relatedTab("مشابه"){categoryOf(it)==categoryOf(model)}
-        relatedTab("من السلسلة"){
-            val key=model.title.trim().split(Regex("\\s+")).take(2).joinToString(" ")
-            key.length>5 && it.title.contains(key,true)
-        }
-        relatedChips.addView(relatedRow)
-        playerDetails.addView(relatedChips,LinearLayout.LayoutParams(-1,dp(55)))
         playerDetails.addView(watchNotice)
-        sectionTitle.text="قد يعجبك أيضًا"
         sectionTitle.visibility=View.GONE
-        watchNotice.text="جارٍ تجهيز المشغل..."
         status.visibility=View.GONE
         moreButton.visibility=View.GONE
         list.scrollToPosition(0)
         sourceOptions.clear();currentQuality=-1
         val token=++currentToken
         if(siteTarget!=null) {
+            // EGYSHOW owns its player UI, ad slots and server selection.
+            // Hide irrelevant YouTube recommendations below its watch page.
+            list.visibility=View.GONE
             sitePlayer.show(siteTarget.first,siteTarget.second)
-            watchNotice.text="مشغّل EGYSHOW الأصلي • السيرفرات والإعلانات من لوحة تحكم الموقع"
             return
         }
         if(explicitSiteSource!=null) {
@@ -1355,7 +1334,7 @@ class MainActivity:Activity() {
         extraResults.visibility=View.GONE
         adjustNormalPlayerHeight()
         webResults.visibility=View.GONE
-        list.visibility=View.VISIBLE
+        list.visibility=if(playingSiteMedia)View.GONE else View.VISIBLE
         moreButton.visibility=View.GONE
     }
     private fun closeMini() {
@@ -1441,7 +1420,7 @@ class MainActivity:Activity() {
             searchRow.visibility=View.GONE
             categories.visibility=View.GONE
             webResults.visibility=View.GONE
-            list.visibility=View.VISIBLE
+            list.visibility=if(playingSiteMedia)View.GONE else View.VISIBLE
         }
     }
     private fun resizePlayer(fullscreen:Boolean) {
@@ -1456,7 +1435,7 @@ class MainActivity:Activity() {
         siteSearch.root.visibility=View.GONE
         moreButton.visibility=View.GONE
         playerDetails.visibility=if(fullscreen)View.GONE else if(isWatching)View.VISIBLE else View.GONE
-        list.visibility=if(fullscreen || webMode)View.GONE else View.VISIBLE
+        list.visibility=if(fullscreen || webMode || playingSiteMedia)View.GONE else View.VISIBLE
         webResults.visibility=View.GONE
         if(fullscreen) {
             @Suppress("DEPRECATION")
