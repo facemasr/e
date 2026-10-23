@@ -6,6 +6,13 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.net.Uri
+import android.os.Build
+import android.view.WindowInsets
+import android.webkit.WebView
+import android.webkit.WebResourceRequest
+import android.webkit.WebViewClient
+import android.webkit.WebChromeClient
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
@@ -50,6 +57,8 @@ class MainActivity:Activity() {
     private lateinit var sectionTitle:TextView
     private lateinit var status:TextView
     private lateinit var list:RecyclerView
+    private lateinit var webResults:WebView
+    private var webMode=false
     private lateinit var adapter:VideoCardAdapter
     private lateinit var panel:VideoPlaybackPanel
     private lateinit var playerDetails:LinearLayout
@@ -217,6 +226,35 @@ class MainActivity:Activity() {
             }
         })
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        webResults = WebView(this).apply {
+            visibility=View.GONE
+            setBackgroundColor(Palette.BG)
+            settings.javaScriptEnabled=true
+            settings.domStorageEnabled=true
+            settings.loadsImagesAutomatically=true
+            settings.mediaPlaybackRequiresUserGesture=true
+            webChromeClient=WebChromeClient()
+            webViewClient=object:WebViewClient() {
+                override fun shouldOverrideUrlLoading(view:WebView?, request:WebResourceRequest?):Boolean {
+                    val uri=request?.url ?: return false
+                    if(!request.isForMainFrame)return false
+                    val host=uri.host.orEmpty().lowercase(Locale.ROOT)
+                    if(!(host=="youtube.com" || host.endsWith(".youtube.com") || host=="youtu.be"))return true
+                    val id=when {
+                        host=="youtu.be" -> uri.lastPathSegment
+                        uri.path?.startsWith("/shorts/")==true -> uri.pathSegments.getOrNull(1)
+                        uri.path?.startsWith("/live/")==true -> uri.pathSegments.getOrNull(1)
+                        else -> uri.getQueryParameter("v")
+                    }
+                    if(id!=null && id.matches(Regex("[A-Za-z0-9_-]{11}"))) {
+                        openPlayer(VideoModel("https://www.youtube.com/watch?v="+id,"فيديو يوتيوب","",-1,-1,"","","",false,false))
+                        return true
+                    }
+                    return false
+                }
+            }
+        }
+        root.addView(webResults,LinearLayout.LayoutParams(-1,0,1f))
         moreButton=baseText("عرض المزيد",14f,true,Palette.SECOND).apply {
             gravity=Gravity.CENTER
             setPadding(0,dp(6),0,dp(6))
@@ -246,6 +284,18 @@ class MainActivity:Activity() {
         tab("◉  الرائج"){leavePlayer();loadTrending()}
         root.addView(footer,LinearLayout.LayoutParams(-1,dp(58)))
         setContentView(root)
+        // Edge-to-edge is enforced by Android 15+ for targetSdk 35.
+        // Keep the header below status-bar icons and footer above gesture navigation.
+        if(Build.VERSION.SDK_INT >= 35) {
+            window.setDecorFitsSystemWindows(false)
+            root.setOnApplyWindowInsetsListener { view,ins ->
+                val bars=ins.getInsets(WindowInsets.Type.systemBars())
+                val full=this::panel.isInitialized && panel.isExpanded()
+                view.setPadding(0,if(full)0 else bars.top,0,if(full)0 else bars.bottom)
+                ins
+            }
+            root.requestApplyInsets()
+        }
     }
 
     private fun chooseCountry() {
@@ -272,7 +322,31 @@ class MainActivity:Activity() {
             info.streamType.toString().contains("LIVE",true)
         )
 
+    private fun displayWebFallback(term:String?, trending:Boolean) {
+        webMode=true
+        list.visibility=View.GONE
+        webResults.visibility=View.VISIBLE
+        moreButton.visibility=View.GONE
+        val url=if(trending)
+            "https://m.youtube.com/?gl="+Uri.encode(country)+"&hl=ar"
+        else "https://m.youtube.com/results?search_query="+Uri.encode(term.orEmpty())+
+            "&gl="+Uri.encode(country)+"&hl=ar"
+        if(trending) {
+            sectionTitle.text="استكشاف الفيديوهات في "+countryLabel
+            status.text="تعذّر تحميل قائمة الرائج من محرك الجلب. هذه صفحة استكشاف يوتيوب، وليست ترتيبًا رسميًا للأكثر بحثًا."
+        } else {
+            status.text="تعذّر استخراج نتائج البحث؛ عُرضت صفحة نتائج يوتيوب داخل التطبيق كبديل."
+        }
+        webResults.loadUrl(url)
+    }
+    private fun resetWebFallback() {
+        webMode=false
+        webResults.visibility=View.GONE
+        webResults.stopLoading()
+        list.visibility=View.VISIBLE
+    }
     private fun loadTrending() {
+        resetWebFallback()
         val token=++currentToken
         inFlight=true
         currentExtractor=null;nextPage=null;customTerm=null
@@ -301,7 +375,7 @@ class MainActivity:Activity() {
                     if(token!=currentToken)return@runOnUiThread
                     inFlight=false
                     adapter.replaceAll(emptyList())
-                    status.text="تعذّر جلب الرائج حاليًا. اضغط تحديث للمحاولة من جديد. "+(e.message ?: "")
+                    displayWebFallback(null,true)
                     moreButton.visibility=View.GONE
                 }
             }
@@ -317,6 +391,7 @@ class MainActivity:Activity() {
         }
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(searchBox.windowToken,0)
         searchBox.clearFocus()
+        resetWebFallback()
         val token=++currentToken
         inFlight=true;currentExtractor=null;nextPage=null;customTerm=term
         moreButton.visibility=View.GONE
@@ -340,7 +415,7 @@ class MainActivity:Activity() {
                 runOnUiThread {
                     if(token!=currentToken)return@runOnUiThread
                     inFlight=false
-                    status.text="فشل البحث: "+(e.message?:"خطأ اتصال")
+                    displayWebFallback(term,false)
                 }
             }
         }
@@ -378,6 +453,8 @@ class MainActivity:Activity() {
         searchRow.visibility=View.GONE
         categories.visibility=View.GONE
         panel.setTitle(model.title)
+        webResults.visibility=View.GONE
+        list.visibility=View.VISIBLE
         panel.player.stop()
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
@@ -483,6 +560,8 @@ class MainActivity:Activity() {
         playerDetails.visibility=View.GONE
         searchRow.visibility=View.VISIBLE
         categories.visibility=View.VISIBLE
+        webResults.visibility=if(webMode)View.VISIBLE else View.GONE
+        list.visibility=if(webMode)View.GONE else View.VISIBLE
         sectionTitle.text=if(customTerm.isNullOrBlank()) "الرائج في "+countryLabel
             else "نتائج البحث عن: "+customTerm
         moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
@@ -493,7 +572,9 @@ class MainActivity:Activity() {
         sectionTitle.visibility=if(fullscreen)View.GONE else View.VISIBLE
         status.visibility=if(fullscreen)View.GONE else View.VISIBLE
         playerDetails.visibility=if(fullscreen)View.GONE else if(isWatching)View.VISIBLE else View.GONE
-        list.visibility=if(fullscreen)View.GONE else View.VISIBLE
+        list.visibility=if(fullscreen || webMode)View.GONE else View.VISIBLE
+        webResults.visibility=if(fullscreen || isWatching || !webMode)View.GONE else View.VISIBLE
+        if(Build.VERSION.SDK_INT>=35)root.requestApplyInsets()
         if(fullscreen) {
             window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
@@ -514,6 +595,7 @@ class MainActivity:Activity() {
         ++currentToken
         worker.shutdownNow()
         panel.release()
+        webResults.destroy()
         super.onDestroy()
     }
 }
