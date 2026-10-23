@@ -24,6 +24,9 @@ internal class EgyshowNativeCatalog(
     private var category="movie"
     private var page=1
     private var moreAvailable=true
+    private var displayedCount=0
+    private var currentCardRow:LinearLayout?=null
+    private val cardWidth=((activity.resources.displayMetrics.widthPixels/d)-34f)/2f
     private val d=activity.resources.displayMetrics.density
     private fun dp(n:Int)=(d*n).toInt()
     private fun text(value:String,size:Float=13f,bold:Boolean=false):TextView=TextView(activity).apply{
@@ -91,6 +94,7 @@ internal class EgyshowNativeCatalog(
         root.visibility=View.VISIBLE
         more.visibility=View.GONE
         page=1;moreAvailable=true;rows.removeAllViews()
+        displayedCount=0;currentCardRow=null
         val name=when(kind){
             "movie"->"الأفلام";"series"->"المسلسلات"
             "short_series"->"المسلسلات القصيرة";else->"القنوات الرياضية"
@@ -138,7 +142,11 @@ internal class EgyshowNativeCatalog(
                 }
                 activity.runOnUiThread {
                     if(disposed||activity.isDestroyed||token!=requestVersion ||group!=category)return@runOnUiThread
-                    if(reset)rows.removeAllViews()
+                    if(reset){
+                        rows.removeAllViews()
+                        displayedCount=0
+                        currentCardRow=null
+                    }
                     media.forEach { renderItem(it,group) }
                     info.text=if(group=="matches")
                         "القنوات الرياضية المتاحة: "+media.size+" • لا توجد مواعيد مباريات مؤكدة من API"
@@ -163,50 +171,114 @@ internal class EgyshowNativeCatalog(
         val title=if(group=="matches")item.optString("name_ar").ifBlank{item.optString("name_en")}
           else item.optString("title_ar").ifBlank{item.optString("title_en")}
         val poster=if(group=="matches")item.optString("logo_url") else item.optString("poster_path")
-        val holder=LinearLayout(activity).apply {
-            orientation=LinearLayout.HORIZONTAL
-            layoutDirection=View.LAYOUT_DIRECTION_RTL
-            gravity=Gravity.CENTER_VERTICAL
-            setPadding(dp(5),dp(9),dp(5),dp(9))
+        val posterHeight=if(group=="short_series")dp(247) else dp(225)
+        val card=LinearLayout(activity).apply {
+            orientation=LinearLayout.VERTICAL
+            background=Palette.round(Color.WHITE,dp(14).toFloat())
+            clipToOutline=true
+            elevation=dp(3).toFloat()
             setOnClickListener { detail(item,group) }
+            contentDescription="عرض تفاصيل "+title
+        }
+        val picture=FrameLayout(activity).apply {
+            setBackgroundColor(0xffe7e8ed.toInt())
+            background=Palette.round(0xffe7e8ed.toInt(),dp(13).toFloat())
+            clipToOutline=true
         }
         val image=ImageView(activity).apply {
             scaleType=ImageView.ScaleType.CENTER_CROP
-            background=Palette.round(0xffeeeeee.toInt(),dp(9).toFloat())
-            clipToOutline=true
             contentDescription=title
         }
         Thumbnails.show(image,poster)
-        holder.addView(image,LinearLayout.LayoutParams(dp(99),dp(137)))
-        val content=LinearLayout(activity).apply {
-            orientation=LinearLayout.VERTICAL
-            gravity=Gravity.CENTER_VERTICAL
-            setPadding(dp(12),0,dp(6),0)
+        picture.addView(image,FrameLayout.LayoutParams(-1,-1))
+        val play=TextView(activity).apply {
+            text="▶";textSize=24f;setTextColor(Color.WHITE)
+            gravity=Gravity.CENTER
+            background=Palette.round(0xaa050608.toInt(),dp(50).toFloat())
         }
-        content.addView(text(title,16f,true).apply {
+        picture.addView(play,FrameLayout.LayoutParams(dp(55),dp(55),Gravity.CENTER))
+        val metadata=when(group) {
+            "matches" -> "● مباشر"
+            "short_series" -> {
+                val episodes=item.optInt("episode_count",0)
+                if(episodes>0)"$episodes حلقة" else "مسلسل قصير"
+            }
+            "series" -> {
+                val episodes=item.optInt("episode_count",0)
+                if(episodes>0)"$episodes حلقة" else "مسلسل"
+            }
+            else -> {
+                val year=item.optString("release_year").takeIf{it.matches(Regex("[12][0-9]{3}"))}
+                year ?: "فيلم"
+            }
+        }
+        val badge=TextView(activity).apply {
+            text=metadata
+            textSize=11.5f
+            typeface=Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            gravity=Gravity.CENTER
+            background=Palette.round(0xdd101019.toInt(),dp(7).toFloat())
+            setPadding(dp(8),dp(3),dp(8),dp(3))
+        }
+        picture.addView(badge,FrameLayout.LayoutParams(-2,dp(29),
+            Gravity.BOTTOM or Gravity.END).apply {
+            rightMargin=dp(7);bottomMargin=dp(7)
+        })
+        if(group!="matches"){
+            val rating=item.optDouble("vote_average",0.0)
+            if(rating in 0.1..10.0) {
+                val score=TextView(activity).apply{
+                    text=String.format(java.util.Locale.US,"★ %.1f",rating)
+                    textSize=11f
+                    typeface=Typeface.DEFAULT_BOLD
+                    setTextColor(Color.WHITE)
+                    gravity=Gravity.CENTER
+                    background=Palette.round(0xc0090b11.toInt(),dp(7).toFloat())
+                    setPadding(dp(7),dp(3),dp(7),dp(3))
+                }
+                picture.addView(score,FrameLayout.LayoutParams(-2,dp(29),
+                    Gravity.TOP or Gravity.END).apply{
+                    rightMargin=dp(7);topMargin=dp(7)
+                })
+            }
+        }
+        card.addView(picture,LinearLayout.LayoutParams(-1,posterHeight))
+        val heading=text(title,13.8f,true).apply {
             maxLines=2
+            gravity=Gravity.RIGHT or Gravity.CENTER_VERTICAL
             ellipsize=android.text.TextUtils.TruncateAt.END
-        })
-        val description=when(group){
-            "matches"->"قناة رياضية • بث مباشر"
-            "movie"->"فيلم • "+item.optString("release_year","")+" • "+item.optString("vote_average","")
-            else->"مسلسل • "+item.optInt("episode_count",0)+" حلقة"
+            setPadding(dp(9),dp(7),dp(8),0)
+            minHeight=dp(52)
         }
-        content.addView(text(description,12f).apply {
+        card.addView(heading,LinearLayout.LayoutParams(-1,dp(58)))
+        val secondary=if(group=="matches")"قناة رياضية"
+        else {
+            val year=item.optString("release_year")
+                .takeIf{it.matches(Regex("[12][0-9]{3}"))}.orEmpty()
+            val type=if(group=="movie")"فيلم" else if(group=="short_series")"دراما قصيرة" else "مسلسل"
+            listOf(type,year).filter{it.isNotBlank()}.joinToString(" • ")
+        }
+        card.addView(text(secondary,11.5f).apply {
             setTextColor(Palette.SECOND)
-            setPadding(0,dp(8),0,dp(2))
-        })
-        if(group!="matches") {
-            content.addView(text(item.optString("overview_ar").take(110),11f).apply {
-                setTextColor(Palette.SECOND)
-                maxLines=3
-                ellipsize=android.text.TextUtils.TruncateAt.END
-            })
+            maxLines=1
+            ellipsize=android.text.TextUtils.TruncateAt.END
+            setPadding(dp(9),0,dp(8),dp(8))
+        },LinearLayout.LayoutParams(-1,dp(28)))
+        if(displayedCount%2==0){
+            currentCardRow=LinearLayout(activity).apply {
+                orientation=LinearLayout.HORIZONTAL
+                layoutDirection=View.LAYOUT_DIRECTION_RTL
+                gravity=Gravity.TOP
+                setPadding(0,0,0,dp(11))
+            }
+            rows.addView(currentCardRow,LinearLayout.LayoutParams(-1,-2))
         }
-        holder.addView(content,LinearLayout.LayoutParams(0,-2,1f))
-        rows.addView(holder)
-        rows.addView(View(activity).apply{setBackgroundColor(0xffececec.toInt())},
-            LinearLayout.LayoutParams(-1,dp(1)))
+        val width=dp(cardWidth.toInt())
+        currentCardRow?.addView(card,LinearLayout.LayoutParams(width,-2).apply{
+            rightMargin=dp(7);leftMargin=dp(6)
+        })
+        displayedCount++
     }
     private fun detail(item:JSONObject,group:String) {
         val id=item.optLong("id",0)
