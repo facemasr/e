@@ -24,6 +24,8 @@ import android.widget.TextView
 internal class AdvertisementBanner(private val host:Activity):LinearLayout(host) {
     private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
     private var loaded=false
+    private var campaignHtml:String?=null
+    private var campaignEnabled=true
     private var lastTouch=0L
     private val web=WebView(host)
     private fun recentTouch():Boolean = SystemClock.elapsedRealtime()-lastTouch < 7000L
@@ -108,7 +110,16 @@ internal class AdvertisementBanner(private val host:Activity):LinearLayout(host)
         addView(holder,LayoutParams(dp(320),dp(50)))
         visibility=View.GONE
     }
+    fun configureCampaign(html:String?, allowDefault:Boolean) {
+        campaignHtml=html?.trim()?.takeIf { it.isNotBlank() && it.length<16000 }
+        campaignEnabled=campaignHtml!=null || allowDefault
+        loaded=false
+        web.stopLoading()
+        web.loadUrl("about:blank")
+        visibility=View.GONE
+    }
     fun display() {
+        if(!campaignEnabled)return
         visibility=View.VISIBLE
         web.onResume()
         if(!loaded) {
@@ -121,7 +132,11 @@ internal class AdvertisementBanner(private val host:Activity):LinearLayout(host)
  class="nc818243337" data-domain="//bonepa.com"
  data-affquery="/5b2e04174a8ba7f27eba/c818243337/?placementName=default"></ins>
 <script src="https://bonepa.com/js/responsive.js" async></script></body></html>"""
-            web.loadDataWithBaseURL("https://bonepa.com/",html,"text/html","UTF-8",null)
+            val htmlToShow=campaignHtml ?: html
+            web.loadDataWithBaseURL(
+                if(campaignHtml!=null)"https://egyshow.com/" else "https://bonepa.com/",
+                htmlToShow,"text/html","UTF-8",null
+            )
         }
     }
     fun hidePlacement() {visibility=View.GONE;web.onPause()}
