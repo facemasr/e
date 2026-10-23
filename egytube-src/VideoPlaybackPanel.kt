@@ -318,13 +318,17 @@ internal class VideoPlaybackPanel(
                 player.setPlaybackSpeed(values[which]); speed.text=labels[which];dialog.dismiss();reveal()
             }.setNegativeButton("إلغاء",null).show()
     }
-    private fun videoIsLandscape():Boolean {
-        if(videoWidth<=0 || videoHeight<=0)return false
+    fun videoAspectRatio():Float {
+        if(videoWidth<=0 || videoHeight<=0)return 16f/9f
         val pixelRatio=if(videoPixelRatio.isFinite() && videoPixelRatio>0f)videoPixelRatio else 1f
         val rotated=videoRotation%180!=0
         val width=if(rotated)videoHeight.toFloat() else videoWidth*pixelRatio
         val height=if(rotated)videoWidth*pixelRatio else videoHeight.toFloat()
-        return width>height
+        return (width/height).coerceIn(0.42f,2.38f)
+    }
+    private fun videoIsLandscape():Boolean {
+        if(videoWidth<=0 || videoHeight<=0)return false
+        return videoAspectRatio()>1f
     }
     private fun applyVideoOrientation() {
         val wanted=if(videoIsLandscape()) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
