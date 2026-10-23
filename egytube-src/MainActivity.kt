@@ -194,7 +194,15 @@ class MainActivity:Activity() {
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         buildUI()
-        if(intent?.action==Intent.ACTION_SEND && intent.type=="text/plain") {
+        val deepId=intent?.data?.let { url ->
+            if(url.scheme=="https" && url.host=="egyshow.com" && url.path=="/watch")
+                url.getQueryParameter("egy")?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+            else null
+        }
+        if(deepId!=null) {
+            openPlayer(VideoModel("https://www.youtube.com/watch?v="+deepId,
+                "فيديو يوتيوب","",-1L,-1L,"","","",false,false))
+        } else if(intent?.action==Intent.ACTION_SEND && intent.type=="text/plain") {
             searchBox.setText(intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty())
             search()
         } else loadTrending()
@@ -538,6 +546,15 @@ class MainActivity:Activity() {
         }
     }
 
+    override fun onNewIntent(intent:Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val url=intent.data ?:return
+        if(url.scheme!="https" || url.host!="egyshow.com" || url.path!="/watch")return
+        val id=url.getQueryParameter("egy")?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))} ?:return
+        openPlayer(VideoModel("https://www.youtube.com/watch?v="+id,
+            "فيديو يوتيوب","",-1L,-1L,"","","",false,false))
+    }
     private fun openShortSeriesPage(url:String) {
         val parsed=Uri.parse(url)
         if(parsed.scheme!="https" || parsed.host!="egyshow.com" ||
