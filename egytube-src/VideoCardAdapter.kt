@@ -174,7 +174,7 @@ internal class VideoCardAdapter(
         Thumbnails.show(h.avatar,video.avatar)
         h.itemView.setOnClickListener { onClick(video) }
         h.more.setOnClickListener {
-            android.app.AlertDialog.Builder(activity).setItems(arrayOf("تشغيل الفيديو","نسخ رابط الفيديو","حفظ للمشاهدة لاحقًا")) { _,which ->
+            android.app.AlertDialog.Builder(activity).setItems(arrayOf("تشغيل الفيديو","نسخ رابط الفيديو","حفظ للمشاهدة لاحقًا","متابعة القناة محليًا")) { _,which ->
                 when(which) {
                     0 -> onClick(video)
                     1 -> (activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
@@ -185,6 +185,15 @@ internal class VideoCardAdapter(
                         saved.add(video.url)
                         prefs.edit().putStringSet("saved_urls",saved).apply()
                         android.widget.Toast.makeText(activity,"تم الحفظ في مكتبتك",android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    3 -> {
+                        if(video.channel.isNotBlank()) {
+                            val prefs=activity.getSharedPreferences("egytube_library",0)
+                            val followed=prefs.getStringSet("followed_channels",emptySet()).orEmpty().toMutableSet()
+                            followed.add(video.channel)
+                            prefs.edit().putStringSet("followed_channels",followed).apply()
+                            android.widget.Toast.makeText(activity,"تتابع "+video.channel+" داخل EGYTUBE",android.widget.Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
             }.show()
