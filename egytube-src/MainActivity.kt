@@ -429,9 +429,11 @@ class MainActivity:Activity() {
         youtubeOfficial=YoutubeOfficialFallback(this)
         playerHost.addView(youtubeOfficial.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
         root.addView(playerHost,LinearLayout.LayoutParams(-1,-2))
-        // The clearly labelled advertising placement belongs INSIDE the player frame.
+        // New third ad placement belongs BELOW the entire video surface, never over
+        // the player image, playback controls, captions, PiP or fullscreen content.
         advertising=AdvertisementBanner(this,AdvertisementBanner.Placement.PLAYER_320)
-        panel.attachAd(advertising)
+        root.addView(advertising,LinearLayout.LayoutParams(-1,-2))
+        advertising.hidePlacement()
         playerDetails=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
             visibility=View.GONE
@@ -948,6 +950,7 @@ class MainActivity:Activity() {
         panel.player.stop()
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
+        advertising.display()
         playerDetails.removeAllViews()
         watchNotice=baseText("جارٍ تجهيز الفيديو...",12f,false,Palette.SECOND).apply {
             setPadding(0,dp(5),0,dp(9))
@@ -1215,6 +1218,7 @@ class MainActivity:Activity() {
         }
         playerHost.visibility=View.GONE
         playerDetails.visibility=View.GONE
+        advertising.hidePlacement()
         searchRow.visibility=View.GONE
         categories.visibility=View.VISIBLE
         sectionTitle.visibility=View.VISIBLE
@@ -1242,6 +1246,7 @@ class MainActivity:Activity() {
         homeWideAd.hidePlacement()
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
+        advertising.display()
         searchRow.visibility=View.GONE
         categories.visibility=View.GONE
         sectionTitle.visibility=View.GONE
@@ -1347,6 +1352,7 @@ class MainActivity:Activity() {
         extraResults.visibility=View.GONE
         moreButton.visibility=View.GONE
         playerDetails.visibility=if(fullscreen)View.GONE else if(isWatching)View.VISIBLE else View.GONE
+        if(fullscreen || !isWatching)advertising.hidePlacement() else advertising.display()
         list.visibility=if(fullscreen || webMode)View.GONE else View.VISIBLE
         webResults.visibility=View.GONE
         if(fullscreen) {
