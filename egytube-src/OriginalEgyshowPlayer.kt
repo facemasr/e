@@ -23,7 +23,7 @@ import android.widget.FrameLayout
  * The exact production EGYSHOW watch player, not an imitation.
  * Only the player surface is WebView: search, cards, browsing & navigation remain native.
  * The page owns its ads, playback settings, servers, episode navigation and access gates.
- * YouTube links are handled by the original EGYSHOW player via its official IFrame path.
+ * Important: this surface is ONLY for EGYSHOW media; YouTube uses the separate native player.
  */
 internal class OriginalEgyshowPlayer(private val activity:Activity) {
     val root=FrameLayout(activity).apply {
@@ -104,10 +104,6 @@ internal class OriginalEgyshowPlayer(private val activity:Activity) {
         if(destroyed || targetType !in listOf("movie","episode","channel") || targetId<=0L)return
         val destination="https://egyshow.com/watch?target_type=$targetType&target_id=$targetId&embed=1"
         display(destination)
-    }
-    fun showYoutube(id:String) {
-        if(destroyed || !id.matches(Regex("[A-Za-z0-9_-]{11}")))return
-        display("https://egyshow.com/watch?egy=$id&embed=1")
     }
     private fun display(url:String) {
         root.visibility=View.VISIBLE
