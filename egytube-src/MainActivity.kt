@@ -70,6 +70,22 @@ class MainActivity:Activity() {
     private lateinit var categories:HorizontalScrollView
     private lateinit var sectionTitle:TextView
     private lateinit var status:TextView
+    private lateinit var searchTools:LinearLayout
+    private lateinit var watchNotice:TextView
+    private var portraitVideo=false
+    private fun normalVideoHeight():Int {
+        val width=resources.displayMetrics.widthPixels
+        val height=resources.displayMetrics.heightPixels
+        return if(portraitVideo)
+            kotlin.math.min((height*0.65f).toInt(),width*16/9)
+        else width*9/16
+    }
+    private fun adjustNormalPlayerHeight() {
+        if(!this::panel.isInitialized || !this::playerHost.isInitialized || panel.isExpanded())return
+        if(isWatching && !miniActive && !inPip) {
+            panel.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
+        }
+    }
     private lateinit var list:RecyclerView
     private lateinit var webResults:WebView
     private var webMode=false
@@ -315,7 +331,7 @@ class MainActivity:Activity() {
             setPadding(dp(17),0,dp(17),dp(8))
         }
         root.addView(status)
-        val searchTools=LinearLayout(this).apply {
+        searchTools=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL
             layoutDirection=View.LAYOUT_DIRECTION_RTL
             gravity=Gravity.CENTER_VERTICAL
@@ -340,9 +356,21 @@ class MainActivity:Activity() {
             { chooseQuality() },
             { fullscreen -> resizePlayer(fullscreen) },
             { enterPip() },
-            { expandMini() }
+            { expandMini() },
+            { portrait ->
+                portraitVideo=portrait
+                adjustNormalPlayerHeight()
+            }
         )
-        panel.playbackError={ error -> runOnUiThread { status.text=error;status.visibility=View.VISIBLE } }
+        panel.playbackError={ error -> runOnUiThread {
+            if(this::watchNotice.isInitialized && isWatching) {
+                watchNotice.text=error
+                watchNotice.visibility=View.VISIBLE
+            } else {
+                status.text=error
+                status.visibility=View.VISIBLE
+            }
+        } }
         panel.player.addListener(object:androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlaying:Boolean) {
                 if(isPlaying && playingModel!=null) recordWatching(playingModel!!)
@@ -352,7 +380,7 @@ class MainActivity:Activity() {
             orientation=LinearLayout.VERTICAL
             visibility=View.GONE
         }
-        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,dp(233)))
+        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
         root.addView(playerHost,LinearLayout.LayoutParams(-1,-2))
         // The clearly labelled advertising placement belongs INSIDE the player frame.
         advertising=AdvertisementBanner(this)
@@ -814,9 +842,15 @@ class MainActivity:Activity() {
         }
         playingModel=model
         lastRecordedUrl=null
+        portraitVideo=false
         isWatching=true
         searchRow.visibility=View.GONE
         categories.visibility=View.GONE
+        sectionTitle.visibility=View.GONE
+        status.visibility=View.GONE
+        searchTools.visibility=View.GONE
+        extraResults.visibility=View.GONE
+        adjustNormalPlayerHeight()
         panel.setTitle(model.title)
         webResults.visibility=View.GONE
         list.visibility=View.VISIBLE
@@ -824,6 +858,9 @@ class MainActivity:Activity() {
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
         playerDetails.removeAllViews()
+        watchNotice=baseText("جارٍ تجهيز الفيديو...",12f,false,Palette.SECOND).apply {
+            setPadding(0,dp(5),0,dp(9))
+        }
         val name=baseText(model.title,18f,true).apply { maxLines=3 }
         playerDetails.addView(name)
         playerDetails.addView(baseText(model.channel +
@@ -869,10 +906,11 @@ class MainActivity:Activity() {
         }
         relatedChips.addView(relatedRow)
         playerDetails.addView(relatedChips,LinearLayout.LayoutParams(-1,dp(55)))
+        playerDetails.addView(watchNotice)
         sectionTitle.text="قد يعجبك أيضًا"
-        sectionTitle.visibility=View.VISIBLE
-        status.text="جارٍ تجهيز المشغل..."
-        status.visibility=View.VISIBLE
+        sectionTitle.visibility=View.GONE
+        watchNotice.text="جارٍ تجهيز المشغل..."
+        status.visibility=View.GONE
         moreButton.visibility=View.GONE
         list.scrollToPosition(0)
         sourceOptions.clear();currentQuality=-1
@@ -973,8 +1011,11 @@ class MainActivity:Activity() {
         }
         playerHost.visibility=View.GONE
         playerDetails.visibility=View.GONE
-        searchRow.visibility=View.VISIBLE
+        searchRow.visibility=View.GONE
         categories.visibility=View.VISIBLE
+        sectionTitle.visibility=View.VISIBLE
+        status.visibility=View.VISIBLE
+        searchTools.visibility=View.VISIBLE
         webResults.visibility=if(webMode)View.VISIBLE else View.GONE
         list.visibility=if(webMode)View.GONE else View.VISIBLE
         sectionTitle.text=if(customTerm.isNullOrBlank()) homeTitle()
@@ -992,6 +1033,11 @@ class MainActivity:Activity() {
         playerDetails.visibility=View.VISIBLE
         searchRow.visibility=View.GONE
         categories.visibility=View.GONE
+        sectionTitle.visibility=View.GONE
+        status.visibility=View.GONE
+        searchTools.visibility=View.GONE
+        extraResults.visibility=View.GONE
+        adjustNormalPlayerHeight()
         webResults.visibility=View.GONE
         list.visibility=View.VISIBLE
         moreButton.visibility=View.GONE
@@ -1071,22 +1117,30 @@ class MainActivity:Activity() {
     private fun resizePlayer(fullscreen:Boolean) {
         header.visibility=if(fullscreen)View.GONE else View.VISIBLE
         footer.visibility=if(fullscreen)View.GONE else View.VISIBLE
-        sectionTitle.visibility=if(fullscreen)View.GONE else View.VISIBLE
-        status.visibility=if(fullscreen)View.GONE else View.VISIBLE
+        searchRow.visibility=View.GONE
+        categories.visibility=View.GONE
+        sectionTitle.visibility=View.GONE
+        status.visibility=View.GONE
+        searchTools.visibility=View.GONE
+        extraResults.visibility=View.GONE
+        moreButton.visibility=View.GONE
         playerDetails.visibility=if(fullscreen)View.GONE else if(isWatching)View.VISIBLE else View.GONE
         list.visibility=if(fullscreen || webMode)View.GONE else View.VISIBLE
-        webResults.visibility=if(fullscreen || isWatching || !webMode)View.GONE else View.VISIBLE
-        if(Build.VERSION.SDK_INT>=35)root.requestApplyInsets()
+        webResults.visibility=View.GONE
         if(fullscreen) {
-            window.decorView.systemUiVisibility=(View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY)
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             playerHost.layoutParams=LinearLayout.LayoutParams(-1,0,1f)
             panel.root.layoutParams=LinearLayout.LayoutParams(-1,-1)
         } else {
-            window.decorView.systemUiVisibility=0
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
+                View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
             playerHost.layoutParams=LinearLayout.LayoutParams(-1,-2)
-            panel.root.layoutParams=LinearLayout.LayoutParams(-1,dp(233))
+            panel.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
         }
+        if(Build.VERSION.SDK_INT>=35)root.requestApplyInsets()
     }
     override fun onConfigurationChanged(config:Configuration) {super.onConfigurationChanged(config)}
     override fun onStop() {
