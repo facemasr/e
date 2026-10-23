@@ -94,6 +94,8 @@ class MainActivity:Activity() {
     private var webMode=false
     private lateinit var adapter:VideoCardAdapter
     private lateinit var panel:VideoPlaybackPanel
+    private lateinit var youtubeOfficial:YoutubeOfficialFallback
+    private var youtubeFallbackActive=false
     private lateinit var playerDetails:LinearLayout
     private lateinit var playerHost:LinearLayout
     private lateinit var advertising:AdvertisementBanner
@@ -214,6 +216,7 @@ class MainActivity:Activity() {
         inPip=false
         // Rebuilding the screen after country selection must release the old player and WebViews.
         if(this::advertising.isInitialized) advertising.dispose()
+        if(this::youtubeOfficial.isInitialized) youtubeOfficial.dispose()
         if(this::panel.isInitialized) panel.release()
         if(this::webResults.isInitialized) webResults.destroy()
         root=LinearLayout(this).apply {
@@ -385,6 +388,8 @@ class MainActivity:Activity() {
             { shareActiveVideo() }
         )
         panel.playbackError={ error -> runOnUiThread {
+            if(isWatching && !youtubeFallbackActive && !pipAuthorizedSource &&
+                switchToOfficialYoutube())return@runOnUiThread
             if(this::watchNotice.isInitialized && isWatching) {
                 watchNotice.text=error
                 watchNotice.visibility=View.VISIBLE
@@ -403,6 +408,8 @@ class MainActivity:Activity() {
             visibility=View.GONE
         }
         playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
+        youtubeOfficial=YoutubeOfficialFallback(this)
+        playerHost.addView(youtubeOfficial.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
         root.addView(playerHost,LinearLayout.LayoutParams(-1,-2))
         // The clearly labelled advertising placement belongs INSIDE the player frame.
         advertising=AdvertisementBanner(this)
@@ -876,9 +883,13 @@ class MainActivity:Activity() {
         if(miniActive) {
             miniActive=false
             miniHost.visibility=View.GONE
-            attachPlayerToHost()
+            if(youtubeFallbackActive)attachOfficialToHost()
+            else attachPlayerToHost()
             panel.setMiniMode(false)
         }
+        youtubeOfficial.stop()
+        youtubeFallbackActive=false
+        panel.root.visibility=View.VISIBLE
         playingModel=model
         shortSeriesSlider.root.visibility=View.GONE
         lastRecordedUrl=null
@@ -995,7 +1006,13 @@ class MainActivity:Activity() {
                     else selectQuality(0)
                 }
             } catch(e:Exception) {
-                runOnUiThread { if(token==currentToken)status.text="تعذّر فتح الفيديو: "+(e.message?:"غير معروف") }
+                runOnUiThread {
+                    if(token!=currentToken || !isWatching || isDestroyed)return@runOnUiThread
+                    if(!switchToOfficialYoutube()){
+                        watchNotice.text="تعذّر تشغيل الفيديو: "+(e.message?:"المصدر غير متاح")
+                        watchNotice.visibility=View.VISIBLE
+                    }
+                }
             }
         }
     }
@@ -1116,17 +1133,37 @@ class MainActivity:Activity() {
 
     private fun attachPlayerToHost() {
         (panel.root.parent as? ViewGroup)?.removeView(panel.root)
-        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,dp(233)))
+        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
+    }
+    private fun attachOfficialToHost() {
+        (youtubeOfficial.root.parent as? ViewGroup)?.removeView(youtubeOfficial.root)
+        playerHost.addView(youtubeOfficial.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
+    }
+    private fun switchToOfficialYoutube():Boolean {
+        val item=playingModel?:return false
+        val id=youtubeVideoId(item.url)?:return false
+        if(!isWatching || item.isLive)return false
+        panel.player.stop()
+        youtubeFallbackActive=true
+        panel.root.visibility=View.GONE
+        youtubeOfficial.root.visibility=View.VISIBLE
+        youtubeOfficial.show(id)
+        if(this::watchNotice.isInitialized) {
+            watchNotice.visibility=View.GONE
+        }
+        return true
     }
     private fun leavePlayer() {
         if(!isWatching)return
-        if(panel.exitFullIfNeeded())return
-        if(playingModel!=null && panel.player.mediaItemCount>0) {
+        if(youtubeFallbackActive && youtubeOfficial.exitFull())return
+        if(!youtubeFallbackActive && panel.exitFullIfNeeded())return
+        if(playingModel!=null && (youtubeFallbackActive || panel.player.mediaItemCount>0)) {
             miniActive=true
             isWatching=false
-            panel.setMiniMode(true)
-            (panel.root.parent as? ViewGroup)?.removeView(panel.root)
-            miniSlot.addView(panel.root,FrameLayout.LayoutParams(-1,-1))
+            if(!youtubeFallbackActive)panel.setMiniMode(true)
+            val view=if(youtubeFallbackActive)youtubeOfficial.root else panel.root
+            (view.parent as? ViewGroup)?.removeView(view)
+            miniSlot.addView(view,FrameLayout.LayoutParams(-1,-1))
             miniTitle.text=playingModel?.title ?: "EGYTUBE"
             miniHost.visibility=View.VISIBLE
         } else {
@@ -1153,8 +1190,11 @@ class MainActivity:Activity() {
         if(!miniActive || inPip)return
         miniActive=false
         miniHost.visibility=View.GONE
-        attachPlayerToHost()
-        panel.setMiniMode(false)
+        if(youtubeFallbackActive)attachOfficialToHost()
+        else {
+            attachPlayerToHost()
+            panel.setMiniMode(false)
+        }
         isWatching=true
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
@@ -1173,10 +1213,16 @@ class MainActivity:Activity() {
         if(!miniActive)return
         miniActive=false
         miniHost.visibility=View.GONE
-        (panel.root.parent as? ViewGroup)?.removeView(panel.root)
-        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,dp(233)))
-        panel.setMiniMode(false)
-        panel.player.stop()
+        if(youtubeFallbackActive){
+            youtubeOfficial.stop()
+            attachOfficialToHost()
+            youtubeFallbackActive=false
+            panel.root.visibility=View.VISIBLE
+        } else {
+            attachPlayerToHost()
+            panel.setMiniMode(false)
+            panel.player.stop()
+        }
         playingModel=null
     }
     private fun enterPip() {
@@ -1276,6 +1322,7 @@ class MainActivity:Activity() {
     }
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if(youtubeFallbackActive && youtubeOfficial.exitFull())return
         if(isWatching)leavePlayer()
         else if(webMode) {
             if(webResults.canGoBack())webResults.goBack()
@@ -1288,6 +1335,7 @@ class MainActivity:Activity() {
         ++currentToken
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
         worker.shutdownNow()
+        if(this::youtubeOfficial.isInitialized)youtubeOfficial.dispose()
         panel.release()
         advertising.dispose()
         webResults.destroy()
