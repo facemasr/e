@@ -63,6 +63,7 @@ import java.util.concurrent.Executors
 class MainActivity:Activity() {
     private val worker=Executors.newSingleThreadExecutor()
     private val recommendationWorker=Executors.newSingleThreadExecutor()
+    private val sitePlaybackWorker=Executors.newSingleThreadExecutor()
     private var recommendationToken=0
     private lateinit var recommendedHeader:TextView
     private lateinit var sameTypeVideos:RecyclerView
@@ -673,16 +674,77 @@ class MainActivity:Activity() {
             return result
         }finally{conn.disconnect()}
     }
-    private fun playEgyshowContent(kind:String,id:Long,title:String,poster:String,shareUrl:String,genre:String){
-        // Same exact production player URL and browser ad controller as the EGYSHOW website.
-        // No confirmation dialog, no client-side relay lease manipulation.
+    private fun playEgyshowContent(kind:String,id:Long,title:String,poster:String,shareUrl:String,genre:String) {
         if(kind !in setOf("movie","episode","channel") || id<=0L)return
+        // Use the same native Media3 player surface as YouTube, with authorization from EGYSHOW.
+        // If a source needs a browser (DRM, iframe-only, unsupported MIME), use the site's
+        // original player INSIDE the video area rather than presenting a broken player.
+        val requestToken=++currentToken
         val watchUrl="https://egyshow.com/watch?target_type=$kind&target_id=$id&embed=1"
         val model=VideoModel(watchUrl,title,"EGYSHOW",-1L,-1L,"",poster,"",false,kind=="channel")
         currentSiteGenre=genre
-        openPlayer(model,siteTarget=kind to id)
-        siteShareUrl=shareUrl
-        siteRelated.showRelated(genre,if(kind=="movie")id else 0L)
+        sitePlaybackWorker.execute {
+            val available=mutableListOf<StreamChoice>()
+            var adHtml:String?=null
+            try {
+                val context=requestSiteJson("/api/v1/player/context?target_type=$kind&target_id=$id")
+                val sources=context.optJSONArray("sources") ?:throw IllegalStateException("no_sources")
+                // No source URL is read from raw database. Each URL is issued by the authenticated
+                // EGYSHOW playback service with the same access policy as the website player.
+                for(i in 0 until kotlin.math.min(sources.length(),5)){
+                    val source=sources.optJSONObject(i)?:continue
+                    if(source.optInt("is_active",1)!=1 || source.optString("last_status") in
+                        setOf("failed","offline","dead"))continue
+                    val sourceId=source.optLong("id",0L)
+                    if(sourceId<1L)continue
+                    try {
+                        val lease=requestSiteJson("/api/v1/player/source/$sourceId/lease",
+                            JSONObject().put("target_type",kind).put("target_id",id)
+                                .put("allow_failover",true))
+                        val kindOfStream=lease.optString("type").lowercase(Locale.ROOT)
+                        val raw=lease.optString("playUrl").trim()
+                        val url=if(raw.startsWith("/"))"https://egyshow.com"+raw else raw
+                        val parsed=Uri.parse(url)
+                        if(parsed.scheme!="https" || parsed.host.isNullOrBlank())continue
+                        // HTML embeds are not media sources. Never hand them to ExoPlayer.
+                        val mime=when(kindOfStream){
+                            "hls"->MimeTypes.APPLICATION_M3U8
+                            "dash"->MimeTypes.APPLICATION_MPD
+                            "video","mp4","progressive"->null
+                            else->continue
+                        }
+                        available.add(StreamChoice("سيرفر "+(i+1)+" • EGYSHOW",url,null,mime))
+                    }catch(_:Exception) {
+                        // A failed individual server must not prevent use of later valid servers.
+                    }
+                    if(available.size>=3)break
+                }
+                try{
+                    val places=requestSiteJson("/api/v1/ads/placements?placements=overlay,banner,pause"+
+                        "&device_type=app&target_type=$kind&target_id=$id")
+                        .optJSONObject("placements")
+                    val currentAd=places?.optJSONObject("overlay") ?: places?.optJSONObject("banner")
+                    adHtml=currentAd?.optString("code_html")?.takeIf { it.isNotBlank() }
+                }catch(_:Exception){}
+            }catch(e:Exception) {
+                // Do not weaken login restrictions: let the official site player present
+                // the same login/purchase/access gate to this user.
+            }
+            runOnUiThread {
+                if(isDestroyed || requestToken!=currentToken)return@runOnUiThread
+                if(available.isNotEmpty()){
+                    openPlayer(model,explicitSiteSource=available.first(),managedAdHtml=adHtml)
+                    siteShareUrl=shareUrl
+                    sourceOptions.clear()
+                    sourceOptions.addAll(available)
+                    currentQuality=0
+                } else {
+                    openPlayer(model,siteTarget=kind to id)
+                    siteShareUrl=shareUrl
+                }
+                siteRelated.showRelated(genre,if(kind=="movie")id else 0L)
+            }
+        }
     }
     private fun showSearch() {
         if(isWatching)leavePlayer()
