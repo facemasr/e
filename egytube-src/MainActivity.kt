@@ -1,6 +1,10 @@
 package com.personal.ytplayer
 
 import android.app.Activity
+import android.Manifest
+import android.app.DownloadManager
+import android.content.pm.PackageManager
+import android.os.Environment
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -93,6 +97,77 @@ class MainActivity:Activity() {
     private lateinit var panel:VideoPlaybackPanel
     private lateinit var playerDetails:LinearLayout
     private lateinit var playerHost:LinearLayout
+    private var pendingDownloadUrl:String?=null
+    private var pendingDownloadName:String?=null
+    private fun shareCurrentVideo() {
+        val model=playingModel ?: return
+        val intent=Intent(Intent.ACTION_SEND).apply {
+            type="text/plain"
+            putExtra(Intent.EXTRA_TEXT,model.url)
+        }
+        startActivity(Intent.createChooser(intent,"مشاركة فيديو EGYTUBE"))
+    }
+    private fun downloadCurrentVideo() {
+        val model=playingModel ?:return
+        val uri=try{Uri.parse(model.url)}catch (_:Exception){null}
+        val path=uri?.path?.lowercase(Locale.ROOT).orEmpty()
+        val allowed=uri?.scheme=="https" &&
+            (path.endsWith(".mp4") || path.endsWith(".m4v") || path.endsWith(".webm"))
+        if(!pipAuthorizedSource || !allowed) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("حفظ الفيديو")
+                .setMessage("التنزيل داخل EGYTUBE متاح لملفات MP4 أو WebM المباشرة التي تملكها أو تملك تصريحًا بحفظها. حفظ فيديوهات YouTube دون إذن ليس مدعومًا؛ استخدم التنزيل الرسمي في YouTube عندما يتوفر.")
+                .setPositiveButton("حسنًا",null).show()
+            return
+        }
+        pendingDownloadUrl=model.url
+        val extension=if(path.endsWith(".webm"))".webm" else ".mp4"
+        val safeName=model.title.replace(Regex("[^\\p{L}\\p{N} _.-]"),"")
+            .trim().take(65).ifBlank{"EGYTUBE_video"}
+        pendingDownloadName=safeName.removeSuffix(extension)+extension
+        if(Build.VERSION.SDK_INT<29 &&
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)!=PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),7327)
+            return
+        }
+        beginDownload()
+    }
+    private fun beginDownload() {
+        val link=pendingDownloadUrl ?:return
+        val file=pendingDownloadName ?:return
+        try {
+            val request=DownloadManager.Request(Uri.parse(link)).apply {
+                setTitle(file)
+                setDescription("جارٍ حفظ الفيديو من EGYTUBE")
+                setMimeType(if(file.endsWith(".webm"))"video/webm" else "video/mp4")
+                setAllowedOverMetered(true)
+                setAllowedOverRoaming(false)
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,"EGYTUBE/"+file)
+            }
+            (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+            Toast.makeText(this,"بدأ التنزيل • مجلد Downloads/EGYTUBE",Toast.LENGTH_LONG).show()
+        } catch (e:Exception) {
+            Toast.makeText(this,"تعذر بدء التنزيل: "+(e.message?:"خطأ"),Toast.LENGTH_LONG).show()
+        } finally {
+            pendingDownloadUrl=null
+            pendingDownloadName=null
+        }
+    }
+    override fun onRequestPermissionsResult(
+        requestCode:Int,permissions:Array<out String>,grantResults:IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults)
+        if(requestCode==7327) {
+            if(grantResults.isNotEmpty() && grantResults[0]==PackageManager.PERMISSION_GRANTED)
+                beginDownload()
+            else {
+                pendingDownloadUrl=null
+                pendingDownloadName=null
+                Toast.makeText(this,"لم يُسمح بحفظ الفيديو على الجهاز",Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     private lateinit var advertising:AdvertisementBanner
     private lateinit var screen:FrameLayout
     private lateinit var miniHost:LinearLayout
@@ -360,7 +435,9 @@ class MainActivity:Activity() {
             { portrait ->
                 portraitVideo=portrait
                 adjustNormalPlayerHeight()
-            }
+            },
+            { shareCurrentVideo() },
+            { downloadCurrentVideo() }
         )
         panel.playbackError={ error -> runOnUiThread {
             if(this::watchNotice.isInitialized && isWatching) {
@@ -870,17 +947,14 @@ class MainActivity:Activity() {
             orientation=LinearLayout.HORIZONTAL
             gravity=Gravity.CENTER_VERTICAL
         }
-        actions.addView(clickable("مشاركة ↗") {
-            val intent=Intent(Intent.ACTION_SEND).apply {
-                type="text/plain";putExtra(Intent.EXTRA_TEXT,model.url)
-            }
-            startActivity(Intent.createChooser(intent,"مشاركة الفيديو"))
-        })
+        actions.addView(clickable("مشاركة ↗"){shareCurrentVideo()})
         actions.addView(clickable("نسخ الرابط") {
             (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
                 .setPrimaryClip(ClipData.newPlainText("رابط الفيديو",model.url))
             Toast.makeText(this,"تم نسخ الرابط",Toast.LENGTH_SHORT).show()
         },LinearLayout.LayoutParams(-2,-2).apply {leftMargin=dp(10)})
+        actions.addView(clickable("تنزيل ↓"){downloadCurrentVideo()},
+            LinearLayout.LayoutParams(-2,-2).apply{leftMargin=dp(8)})
         playerDetails.addView(actions)
         val relatedChips=HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled=false
