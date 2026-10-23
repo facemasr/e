@@ -1022,8 +1022,10 @@ class MainActivity:Activity() {
         panel.root.getLocationOnScreen(location)
         val rect=Rect(location[0],location[1],
             location[0]+panel.root.width,location[1]+panel.root.height)
+        // PiP preserves portrait aspect ratio for authorized vertical media.
+        val aspect=panel.videoAspectRatio()
         val builder=PictureInPictureParams.Builder()
-            .setAspectRatio(Rational(16,9))
+            .setAspectRatio(Rational((aspect*1000).toInt().coerceAtLeast(1),1000))
         if(!rect.isEmpty)builder.setSourceRectHint(rect)
         try {
             if(Build.VERSION.SDK_INT>=31)builder.setAutoEnterEnabled(true)
