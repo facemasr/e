@@ -1,7 +1,7 @@
 name: Build Personal YT Player APK
 on:
   push:
-    branches: [egytube-youtube-shortdramas-v039]
+    branches: [egyshow-native-integration-preview-v040]
   workflow_dispatch:
 permissions:
   contents: read
@@ -52,11 +52,11 @@ jobs:
               namespace = "com.personal.ytplayer"
               compileSdk = 36
               defaultConfig {
-                  applicationId = "com.personal.ytplayer"
+                  applicationId = "com.egyshow.nativepreview"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 12
-                  versionName = "0.3.9"
+                  versionCode = 13
+                  versionName = "0.4.0"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -78,9 +78,9 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-              <application android:label="EGYTUBE" android:icon="@drawable/egytube_logo" android:usesCleartextTraffic="false"
+              <application android:label="EGYSHOW Native Preview" android:icon="@drawable/egytube_logo" android:usesCleartextTraffic="false"
                   android:supportsRtl="true" android:theme="@android:style/Theme.Material.NoActionBar">
-                  <activity android:name=".MainActivity" android:exported="true" android:supportsPictureInPicture="true" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|uiMode|keyboardHidden">
+                  <activity android:name="com.personal.ytplayer.MainActivity" android:exported="true" android:supportsPictureInPicture="true" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|uiMode|keyboardHidden">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN"/>
                           <category android:name="android.intent.category.LAUNCHER"/>
@@ -484,6 +484,6 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: EGYTUBE-v0.3.9-debug-apk
+          name: EGYSHOW-Native-Preview-v0.4.0-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
