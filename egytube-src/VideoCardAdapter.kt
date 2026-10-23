@@ -84,15 +84,43 @@ internal object Thumbnails {
 internal class VideoCardAdapter(
     private val activity: Activity,
     private val onClick:(VideoModel)->Unit
-): RecyclerView.Adapter<VideoCardAdapter.Holder>() {
+): RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+    private val slotAds=mutableListOf<AdvertisementBanner>()
+    private val rectIndex=5
+    private val scriptIndex=13
+    private fun hasRectangle()=items.size>rectIndex
+    private fun hasScript()=items.size>12
+    private fun indexFor(position:Int):Int=position-
+        (if(hasRectangle() && position>rectIndex)1 else 0)-
+        (if(hasScript() && position>scriptIndex)1 else 0)
+    override fun getItemViewType(position:Int):Int=when {
+        hasRectangle() && position==rectIndex->1
+        hasScript() && position==scriptIndex->2
+        else->0
+    }
+    private class AdHolder(view:View,val ad:AdvertisementBanner):RecyclerView.ViewHolder(view)
+
     val items= mutableListOf<VideoModel>()
     private val d=activity.resources.displayMetrics.density
     private fun dp(n:Int)=(n*d).toInt()
     class Holder(view:View, val cover:ImageView, val avatar:ImageView,
                  val name:TextView,val details:TextView,val length:TextView,
                  val more:TextView):RecyclerView.ViewHolder(view)
-    override fun getItemCount():Int=items.size
-    override fun onCreateViewHolder(parent:ViewGroup,viewType:Int):Holder {
+    override fun getItemCount():Int=items.size+
+        (if(hasRectangle())1 else 0)+(if(hasScript())1 else 0)
+    override fun onCreateViewHolder(parent:ViewGroup,viewType:Int):RecyclerView.ViewHolder {
+        if(viewType!=0) {
+            val kind=if(viewType==1)AdvertisementBanner.Placement.HOME_RECTANGLE
+                else AdvertisementBanner.Placement.FEED_SCRIPT
+            val ad=AdvertisementBanner(activity,kind)
+            slotAds.add(ad)
+            val holder=FrameLayout(activity).apply {
+                setPadding(dp(8),dp(10),dp(8),dp(12))
+                addView(ad,FrameLayout.LayoutParams(-1,-2,Gravity.CENTER))
+                setBackgroundColor(Color.WHITE)
+            }
+            return AdHolder(holder,ad)
+        }
         val outer=LinearLayout(activity).apply {
             orientation=LinearLayout.VERTICAL
             setPadding(0,dp(6),0,dp(16))
@@ -168,8 +196,13 @@ internal class VideoCardAdapter(
             LinearLayout.LayoutParams(-1,dp(1)))
         return Holder(outer,cover,avatar,name,details,duration,more)
     }
-    override fun onBindViewHolder(h:Holder,position:Int) {
-        val video=items[position]
+    override fun onBindViewHolder(holder:RecyclerView.ViewHolder,position:Int) {
+        if(holder is AdHolder) {
+            holder.ad.display()
+            return
+        }
+        val h=holder as Holder
+        val video=items[indexFor(position)]
         h.name.text=video.title
         val verified = if (video.verified) " ✓" else ""
         val views=if (video.views>=0) " • "+Palette.count(video.views)+" مشاهدة" else ""
@@ -211,9 +244,13 @@ internal class VideoCardAdapter(
         items.addAll(all)
         notifyDataSetChanged()
     }
+    fun disposeAds(){
+        slotAds.forEach{it.dispose()}
+        slotAds.clear()
+    }
     fun append(all:List<VideoModel>) {
         val old=items.size
         items.addAll(all)
-        notifyItemRangeInserted(old,all.size)
+        notifyDataSetChanged()
     }
 }
