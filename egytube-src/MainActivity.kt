@@ -66,6 +66,7 @@ class MainActivity:Activity() {
     private val cachedVideos=mutableListOf<VideoModel>()
     private val extraItems=mutableListOf<InfoItem>()
     private lateinit var extraResults:HorizontalScrollView
+    private lateinit var shortSeriesSlider:ShortSeriesCarousel
     private lateinit var extraRow:LinearLayout
     private var typeFilter="الكل"
     private var sortMode="الملاءمة"
@@ -200,6 +201,7 @@ class MainActivity:Activity() {
     }
 
     private fun buildUI() {
+        if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
         miniActive=false
         inPip=false
         // Rebuilding the screen after country selection must release the old player and WebViews.
@@ -324,6 +326,9 @@ class MainActivity:Activity() {
         }
         categories.addView(chips)
         root.addView(categories,LinearLayout.LayoutParams(-1,dp(49)))
+        shortSeriesSlider=ShortSeriesCarousel(this) { url -> openShortSeriesPage(url) }
+        root.addView(shortSeriesSlider.root,LinearLayout.LayoutParams(-1,-2))
+        shortSeriesSlider.load()
 
         sectionTitle=baseText(homeTitle(),19f,true).apply {
             setPadding(dp(17),dp(12),dp(10),dp(4))
@@ -532,6 +537,23 @@ class MainActivity:Activity() {
         }
     }
 
+    private fun openShortSeriesPage(url:String) {
+        val parsed=Uri.parse(url)
+        if(parsed.scheme!="https" || parsed.host!="egyshow.com" ||
+            !parsed.path.orEmpty().startsWith("/ar/short-series"))return
+        if(isWatching)leavePlayer()
+        shortSeriesSlider.root.visibility=View.GONE
+        customTerm="مسلسلات قصيرة"
+        webMode=true
+        sectionTitle.text="المسلسلات القصيرة"
+        status.text="تصفح المحتوى عبر موقع إيجي شو"
+        categories.visibility=View.GONE
+        searchRow.visibility=View.GONE
+        list.visibility=View.GONE
+        webResults.visibility=View.VISIBLE
+        moreButton.visibility=View.GONE
+        webResults.loadUrl(url)
+    }
     private fun showSearch() {
         if(isWatching)leavePlayer()
         searchRow.visibility=View.VISIBLE
@@ -711,6 +733,8 @@ class MainActivity:Activity() {
         list.visibility=View.VISIBLE
     }
     private fun loadTrending() {
+        shortSeriesSlider.root.visibility=View.VISIBLE
+        categories.visibility=View.VISIBLE
         resetWebFallback()
         val token=++currentToken
         inFlight=true
@@ -751,6 +775,7 @@ class MainActivity:Activity() {
         }
     }
     private fun search() {
+        shortSeriesSlider.root.visibility=View.GONE
         val term=searchBox.text.toString().trim()
         searchBox.dismissDropDown()
         if(term.isBlank()) {loadTrending();return}
@@ -845,6 +870,7 @@ class MainActivity:Activity() {
             panel.setMiniMode(false)
         }
         playingModel=model
+        shortSeriesSlider.root.visibility=View.GONE
         lastRecordedUrl=null
         portraitVideo=false
         isWatching=true
@@ -1079,6 +1105,7 @@ class MainActivity:Activity() {
         sectionTitle.visibility=View.VISIBLE
         status.visibility=View.VISIBLE
         searchTools.visibility=View.VISIBLE
+        shortSeriesSlider.root.visibility=if(customTerm.isNullOrBlank())View.VISIBLE else View.GONE
         webResults.visibility=if(webMode)View.VISIBLE else View.GONE
         list.visibility=if(webMode)View.GONE else View.VISIBLE
         sectionTitle.text=if(customTerm.isNullOrBlank()) homeTitle()
@@ -1213,11 +1240,16 @@ class MainActivity:Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if(isWatching)leavePlayer()
+        else if(webMode) {
+            if(webResults.canGoBack())webResults.goBack()
+            else {resetWebFallback();customTerm=null;loadTrending()}
+        }
         else if(miniActive)closeMini()
         else super.onBackPressed()
     }
     override fun onDestroy() {
         ++currentToken
+        if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
         worker.shutdownNow()
         panel.release()
         advertising.dispose()
