@@ -55,7 +55,6 @@ internal class VideoPlaybackPanel(
     private lateinit var watermark:LinearLayout
     private var miniMode=false
     private var pipMode=false
-    private var adBanner:AdvertisementBanner?=null
     private lateinit var play:TextView
     private lateinit var elapsed:TextView
     private lateinit var duration:TextView
@@ -102,20 +101,6 @@ internal class VideoPlaybackPanel(
     var playbackError:((String)->Unit)?=null
     private var released=false
     private val hideControls=Runnable { if(player.isPlaying && !miniMode && !pipMode) overlay.visibility=View.INVISIBLE }
-    private val hideAd=Runnable { adBanner?.hidePlacement() }
-    private val showAd=object:Runnable {
-        override fun run() {
-            if(released)return
-            if(player.isPlaying && !miniMode && !pipMode) {
-                overlay.visibility=View.INVISIBLE
-                adBanner?.display()
-                handler.removeCallbacks(hideAd)
-                handler.postDelayed(hideAd,9000L)
-            }
-            handler.postDelayed(this,135000L)
-        }
-    }
-    private var adCycleScheduled=false
     private val progressLoop=object:Runnable {
         override fun run() {
             if(released)return
@@ -360,13 +345,11 @@ internal class VideoPlaybackPanel(
         handler.post(progressLoop)
     }
     private fun toggle() {
-        adBanner?.hidePlacement()
         if(overlay.visibility==View.VISIBLE) {
             overlay.visibility=View.INVISIBLE;handler.removeCallbacks(hideControls)
         } else reveal()
     }
     private fun reveal(autohide:Boolean=true) {
-        adBanner?.hidePlacement()
         if(miniMode || pipMode)return
         overlay.visibility=View.VISIBLE
         handler.removeCallbacks(hideControls)
@@ -380,18 +363,12 @@ internal class VideoPlaybackPanel(
     fun setSubtitle(value:String) {
         subtitle.text=if(value.isBlank())"EGYTUBE" else value
     }
-    fun attachAd(banner:AdvertisementBanner) {
-        adBanner=banner
-        val width=kotlin.math.min(dp(336),activity.resources.displayMetrics.widthPixels-dp(12))
-        root.addView(banner,FrameLayout.LayoutParams(width,dp(84),Gravity.CENTER))
-        banner.hidePlacement()
-    }
     fun setMiniMode(active:Boolean) {
         miniMode=active
         if(active) {
             overlay.visibility=View.GONE
             watermark.visibility=View.GONE
-            adBanner?.hidePlacement()
+
         } else if(!pipMode) {
             watermark.visibility=View.VISIBLE
             reveal()
@@ -403,7 +380,7 @@ internal class VideoPlaybackPanel(
             overlay.visibility=View.GONE
             watermark.visibility=View.GONE
             root.keepScreenOn=false
-            adBanner?.hidePlacement()
+
         } else if(!miniMode) {
             root.keepScreenOn=player.isPlaying
             watermark.visibility=View.VISIBLE
@@ -417,10 +394,6 @@ internal class VideoPlaybackPanel(
         hasVideoDimensions=false
         landscapeVideo=false
         if(expanded)activity.requestedOrientation=displayOrientation()
-        if(!adCycleScheduled) {
-            adCycleScheduled=true
-            handler.postDelayed(showAd,16000L)
-        }
         player.setMediaSource(media)
         player.prepare()
         if(resumePosition>0L)player.seekTo(resumePosition)
@@ -483,7 +456,7 @@ internal class VideoPlaybackPanel(
         root.keepScreenOn=false
         activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         released=true
-        adBanner?.hidePlacement()
+
         handler.removeCallbacksAndMessages(null)
         preview.player=null;player.release()
     }
