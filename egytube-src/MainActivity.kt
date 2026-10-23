@@ -100,6 +100,7 @@ class MainActivity:Activity() {
     private lateinit var playerDetails:LinearLayout
     private lateinit var playerHost:LinearLayout
     private lateinit var advertising:AdvertisementBanner
+    private lateinit var homeWideAd:AdvertisementBanner
     private lateinit var screen:FrameLayout
     private lateinit var miniHost:LinearLayout
     private lateinit var miniSlot:FrameLayout
@@ -209,6 +210,8 @@ class MainActivity:Activity() {
         inPip=false
         // Rebuilding the screen after country selection must release the old player and WebViews.
         if(this::advertising.isInitialized) advertising.dispose()
+        if(this::homeWideAd.isInitialized) homeWideAd.dispose()
+        if(this::adapter.isInitialized) adapter.disposeAds()
         if(this::youtubeOfficial.isInitialized) youtubeOfficial.dispose()
         if(this::panel.isInitialized) panel.release()
         if(this::webResults.isInitialized) webResults.destroy()
@@ -339,6 +342,9 @@ class MainActivity:Activity() {
         )
         root.addView(shortSeriesSlider.root,LinearLayout.LayoutParams(-1,-2))
         shortSeriesSlider.load()
+        homeWideAd=AdvertisementBanner(this,AdvertisementBanner.Placement.HOME_WIDE)
+        root.addView(homeWideAd,LinearLayout.LayoutParams(-1,-2))
+        homeWideAd.display()
 
         sectionTitle=baseText(homeTitle(),19f,true).apply {
             setPadding(dp(17),dp(12),dp(10),dp(4))
@@ -405,7 +411,7 @@ class MainActivity:Activity() {
         playerHost.addView(youtubeOfficial.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
         root.addView(playerHost,LinearLayout.LayoutParams(-1,-2))
         // The clearly labelled advertising placement belongs INSIDE the player frame.
-        advertising=AdvertisementBanner(this)
+        advertising=AdvertisementBanner(this,AdvertisementBanner.Placement.PLAYER_320)
         panel.attachAd(advertising)
         playerDetails=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
@@ -740,6 +746,7 @@ class MainActivity:Activity() {
         list.visibility=View.VISIBLE
     }
     private fun loadTrending() {
+        homeWideAd.display()
         shortSeriesSlider.root.visibility=View.VISIBLE
         categories.visibility=View.VISIBLE
         resetWebFallback()
@@ -784,6 +791,7 @@ class MainActivity:Activity() {
         }
     }
     private fun search() {
+        homeWideAd.hidePlacement()
         shortSeriesSlider.root.visibility=View.GONE
         val term=searchBox.text.toString().trim()
         searchBox.dismissDropDown()
@@ -888,6 +896,7 @@ class MainActivity:Activity() {
         youtubeFallbackActive=false
         panel.root.visibility=View.VISIBLE
         playingModel=model
+        homeWideAd.hidePlacement()
         shortSeriesSlider.root.visibility=View.GONE
         lastRecordedUrl=null
         portraitVideo=false
@@ -1179,6 +1188,8 @@ class MainActivity:Activity() {
         status.visibility=View.VISIBLE
         searchTools.visibility=View.VISIBLE
         shortSeriesSlider.root.visibility=if(customTerm.isNullOrBlank())View.VISIBLE else View.GONE
+        if(customTerm.isNullOrBlank())homeWideAd.display()
+        else homeWideAd.hidePlacement()
         webResults.visibility=if(webMode)View.VISIBLE else View.GONE
         list.visibility=if(webMode)View.GONE else View.VISIBLE
         sectionTitle.text=if(customTerm.isNullOrBlank()) homeTitle()
@@ -1195,6 +1206,7 @@ class MainActivity:Activity() {
             panel.setMiniMode(false)
         }
         isWatching=true
+        homeWideAd.hidePlacement()
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
         searchRow.visibility=View.GONE
@@ -1334,6 +1346,8 @@ class MainActivity:Activity() {
     override fun onDestroy() {
         ++currentToken
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
+        if(this::adapter.isInitialized)adapter.disposeAds()
+        if(this::homeWideAd.isInitialized)homeWideAd.dispose()
         worker.shutdownNow()
         if(this::youtubeOfficial.isInitialized)youtubeOfficial.dispose()
         panel.release()
