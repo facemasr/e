@@ -86,7 +86,8 @@ class MainActivity:Activity() {
     private fun adjustNormalPlayerHeight() {
         if(!this::panel.isInitialized || !this::playerHost.isInitialized || panel.isExpanded())return
         if(isWatching && !miniActive && !inPip) {
-            panel.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
+            if(youtubeFallbackActive)youtubeOfficial.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
+            else panel.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
         }
     }
     private lateinit var list:RecyclerView
@@ -196,15 +197,7 @@ class MainActivity:Activity() {
         @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         buildUI()
-        val deepId=intent?.data?.let { url ->
-            if(url.scheme=="https" && url.host=="egyshow.com" && url.path=="/watch")
-                url.getQueryParameter("egy")?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
-            else null
-        }
-        if(deepId!=null) {
-            openPlayer(VideoModel("https://www.youtube.com/watch?v="+deepId,
-                "فيديو يوتيوب","",-1L,-1L,"","","",false,false))
-        } else if(intent?.action==Intent.ACTION_SEND && intent.type=="text/plain") {
+        if(intent?.action==Intent.ACTION_SEND && intent.type=="text/plain") {
             searchBox.setText(intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty())
             search()
         } else loadTrending()
@@ -449,8 +442,6 @@ class MainActivity:Activity() {
                     val uri=request?.url ?: return false
                     if(!request.isForMainFrame)return false
                     val host=uri.host.orEmpty().lowercase(Locale.ROOT)
-                    // Let our own short-series catalog and episode pages navigate inside WebView.
-                    if(host=="egyshow.com" || host=="www.egyshow.com")return false
                     if(!(host=="youtube.com" || host.endsWith(".youtube.com") || host=="youtu.be"))return true
                     val id=when {
                         host=="youtu.be" -> uri.lastPathSegment
@@ -562,11 +553,10 @@ class MainActivity:Activity() {
     override fun onNewIntent(intent:Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val url=intent.data ?:return
-        if(url.scheme!="https" || url.host!="egyshow.com" || url.path!="/watch")return
-        val id=url.getQueryParameter("egy")?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))} ?:return
-        openPlayer(VideoModel("https://www.youtube.com/watch?v="+id,
-            "فيديو يوتيوب","",-1L,-1L,"","","",false,false))
+        if(intent.action==Intent.ACTION_SEND && intent.type=="text/plain"){
+            searchBox.setText(intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty())
+            search()
+        }
     }
     private fun showSearch() {
         if(isWatching)leavePlayer()
@@ -763,10 +753,12 @@ class MainActivity:Activity() {
         worker.execute {
             try {
                 NewPipe.setPreferredContentCountry(ContentCountry(country))
-                val extractor=ServiceList.YouTube.kioskList.defaultKioskExtractor
+                // The default kiosk is live-only; get actual recorded videos instead.
+                val extractor=ServiceList.YouTube.getSearchExtractor("فيديوهات جديدة متنوعة")
                 extractor.fetchPage()
                 val page=extractor.initialPage
                 val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom)
+                    .filterNot { it.isLive }
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false
@@ -828,6 +820,7 @@ class MainActivity:Activity() {
                 extractor.fetchPage()
                 val page=extractor.initialPage
                 val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom)
+                    .filterNot { it.isLive }
                 val others=page.items.filter{it is ChannelInfoItem || it is PlaylistInfoItem}
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
@@ -877,6 +870,10 @@ class MainActivity:Activity() {
     }
 
     private fun openPlayer(model:VideoModel) {
+        if(model.isLive) {
+            Toast.makeText(this,"البث المباشر غير متاح في EGYTUBE",Toast.LENGTH_LONG).show()
+            return
+        }
         pipAuthorizedSource=model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
         // If a prior video is playing in the mini view, return the same video surface
         // to the standard player before beginning the selected video.
@@ -984,6 +981,8 @@ class MainActivity:Activity() {
         worker.execute {
             try {
                 val info=StreamInfo.getInfo(model.url)
+                if(info.streamType.toString().contains("LIVE",true))
+                    throw IllegalStateException("البث المباشر غير متاح")
                 if(info.ageLimit>0) throw IllegalStateException("الفيديو مقيّد بالعمر")
                 val opts=mutableListOf<StreamChoice>()
                 info.videoStreams.filter { it.isUrl && it.content.startsWith("https://") }
@@ -1032,7 +1031,7 @@ class MainActivity:Activity() {
     }
     private fun shareLink(item:VideoModel):String {
         val id=youtubeVideoId(item.url)
-        return if(id==null)item.url else "https://egyshow.com/watch?egy="+id
+        return if(id==null)item.url else "https://www.youtube.com/watch?v="+id
     }
     private fun copyActiveVideoLink() {
         val item=playingModel ?:return
@@ -1305,7 +1304,8 @@ class MainActivity:Activity() {
             window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             playerHost.layoutParams=LinearLayout.LayoutParams(-1,0,1f)
-            panel.root.layoutParams=LinearLayout.LayoutParams(-1,-1)
+            if(youtubeFallbackActive)youtubeOfficial.root.layoutParams=LinearLayout.LayoutParams(-1,-1)
+            else panel.root.layoutParams=LinearLayout.LayoutParams(-1,-1)
         } else {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
