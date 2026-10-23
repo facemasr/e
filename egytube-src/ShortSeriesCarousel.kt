@@ -96,22 +96,23 @@ internal class ShortSeriesCarousel(
                 "دراما قصيرة مدبلجة الحلقة الأولى",
                 "مسلسلات قصيرة حلقات كاملة"
             )
-            for (phrase in phrases) {
+            for(phrase in phrases){
                 if(closed.get())return@execute
                 try {
-                    // The same YouTube extractor that powers EGYTUBE's search page.
-                    val extractor=ServiceList.YouTube.getSearchExtractor(phrase)
-                    extractor.fetchPage()
-                    val found=extractor.initialPage.items.filterIsInstance<StreamInfoItem>()
-                        .filter{ it.url.startsWith("https://") &&
-                                 it.name.isNotBlank() &&
-                                 !it.streamType.toString().contains("LIVE",true)}
-                        .map(::asVideo)
-                    found.forEach { item ->
-                        if(seen.add(item.url))videos.add(item)
-                    }
-                } catch (_:Exception) {
-                    // Search availability can vary by country. Try the next query.
+                    // Use the same working server-backed YouTube search as the main feed.
+                    val found=YoutubeFeedApi.search(phrase)
+                    found.filterNot{it.isLive}.forEach{if(seen.add(it.url))videos.add(it)}
+                }catch(_:Exception){
+                    try{
+                        val extractor=ServiceList.YouTube.getSearchExtractor(phrase)
+                        extractor.fetchPage()
+                        extractor.initialPage.items.filterIsInstance<StreamInfoItem>()
+                            .filter{it.url.startsWith("https://") &&
+                                it.name.isNotBlank() &&
+                                !it.streamType.toString().contains("LIVE",true)}
+                            .map(::asVideo)
+                            .forEach{if(seen.add(it.url))videos.add(it)}
+                    }catch(_:Exception){}
                 }
                 if(videos.size>=18)break
             }
