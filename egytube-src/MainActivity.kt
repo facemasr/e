@@ -873,31 +873,40 @@ class MainActivity:Activity() {
         moreButton.visibility=View.GONE
         worker.execute {
             try {
-                NewPipe.setPreferredContentCountry(ContentCountry(country))
-                val extractor=ServiceList.YouTube.kioskList.defaultKioskExtractor
-                extractor.fetchPage()
-                val page=extractor.initialPage
-                val videos=page.items.filterIsInstance<StreamInfoItem>()
-                    .map(::modelFrom).filterNot{it.isLive}
+                // YouTube's default NewPipe kiosk may now contain ONLY live broadcasts.
+                // Load real recorded-video cards from the server-supported discovery API first.
+                var videos=try{YoutubeFeedApi.home()}catch(_:Exception){emptyList()}
+                var extractor:ListExtractor<out InfoItem>?=null
+                var pages:Page?=null
+                if(videos.isEmpty()) {
+                    NewPipe.setPreferredContentCountry(ContentCountry(country))
+                    val search=ServiceList.YouTube.getSearchExtractor("فيديوهات عربية متنوعة جديدة")
+                    search.fetchPage()
+                    val first=search.initialPage
+                    videos=first.items.filterIsInstance<StreamInfoItem>()
+                        .map(::modelFrom).filterNot{it.isLive}
+                    extractor=search
+                    pages=first.nextPage
+                }
+                if(videos.isEmpty())throw IllegalStateException("لم تُسترجع فيديوهات عادية")
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false
                     currentExtractor=extractor
-                    nextPage=page.nextPage
+                    nextPage=pages
                     cachedVideos.clear();cachedVideos.addAll(videos)
                     extraItems.clear()
                     applyFilters()
-                    status.text=if(videos.isEmpty()) "لا توجد فيديوهات متاحة حاليًا." else
-                        "الفيديوهات المحمّلة: "+videos.size+" • اختر فئة من الأعلى"
+                    status.text="الفيديوهات: "+videos.size
                     moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
                 }
             } catch(e:Exception) {
                 runOnUiThread {
-                    if(token!=currentToken)return@runOnUiThread
+                    if(token!=currentToken || isDestroyed)return@runOnUiThread
                     inFlight=false
                     cachedVideos.clear()
                     adapter.replaceAll(emptyList())
-                    displayWebFallback(null,true)
+                    status.text="تعذّر تحميل فيديوهات يوتيوب: "+(e.message?:"تحقق من الاتصال")
                     moreButton.visibility=View.GONE
                 }
             }
@@ -948,27 +957,37 @@ class MainActivity:Activity() {
         status.text="جارٍ البحث في EGYSHOW وYouTube..."
         worker.execute {
             try {
-                NewPipe.setPreferredContentCountry(ContentCountry(country))
-                val extractor=ServiceList.YouTube.getSearchExtractor(term)
-                extractor.fetchPage()
-                val page=extractor.initialPage
-                val videos=page.items.filterIsInstance<StreamInfoItem>()
-                    .map(::modelFrom).filterNot{it.isLive}
-                val others=emptyList<InfoItem>()
+                // Verified EGYSHOW YouTube discovery endpoint; uses server-maintained
+                // metadata and rejects live broadcasts. Never depends on the live kiosk.
+                var videos=try{YoutubeFeedApi.search(term)}catch(_:Exception){emptyList()}
+                var extractor:ListExtractor<out InfoItem>?=null
+                var pages:Page?=null
+                if(videos.isEmpty()) {
+                    NewPipe.setPreferredContentCountry(ContentCountry(country))
+                    val search=ServiceList.YouTube.getSearchExtractor(term)
+                    search.fetchPage()
+                    val page=search.initialPage
+                    videos=page.items.filterIsInstance<StreamInfoItem>()
+                        .map(::modelFrom).filterNot{it.isLive}
+                    extractor=search
+                    pages=page.nextPage
+                }
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
-                    inFlight=false;currentExtractor=extractor;nextPage=page.nextPage
+                    inFlight=false;currentExtractor=extractor;nextPage=pages
                     cachedVideos.clear();cachedVideos.addAll(videos)
-                    extraItems.clear();extraItems.addAll(others)
+                    extraItems.clear()
                     applyFilters()
-                    status.text=if(videos.isEmpty() && others.isEmpty()) "لم يتم العثور على فيديوهات." else videos.size.toString()+" نتيجة"
+                    status.text=if(videos.isEmpty()) "لا توجد فيديوهات مسجلة مطابقة." else videos.size.toString()+" فيديو"
                     moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
                 }
             } catch(e:Exception) {
                 runOnUiThread {
-                    if(token!=currentToken)return@runOnUiThread
+                    if(token!=currentToken || isDestroyed)return@runOnUiThread
                     inFlight=false
-                    displayWebFallback(term,false)
+                    cachedVideos.clear()
+                    adapter.replaceAll(emptyList())
+                    status.text="تعذّر البحث في يوتيوب. "+(e.message?:"")
                 }
             }
         }
