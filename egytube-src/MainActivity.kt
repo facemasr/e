@@ -71,6 +71,7 @@ class MainActivity:Activity() {
     private lateinit var siteHomeSlider:EgyshowMediaShelves
     private lateinit var siteRelated:EgyshowMediaShelves
     private var currentSiteGenre="movie"
+    private var currentSiteTarget:Pair<String,Long>?=null
 
     private lateinit var root:LinearLayout
     private lateinit var header:LinearLayout
@@ -422,7 +423,7 @@ class MainActivity:Activity() {
             { shareActiveVideo() }
         )
         panel.playbackError={ error -> runOnUiThread {
-            if(playingSiteMedia && !switchingSiteServer && isWatching &&
+            if(playingSiteMedia && !websiteWatchActive && !switchingSiteServer && isWatching &&
                 currentQuality>=0 && currentQuality+1<sourceOptions.size) {
                 switchingSiteServer=true
                 val next=currentQuality+1
@@ -430,6 +431,17 @@ class MainActivity:Activity() {
                 selectQuality(next)
                 android.widget.Toast.makeText(this,"تجربة سيرفر بديل من إيجي شو",Toast.LENGTH_SHORT).show()
                 switchingSiteServer=false
+            }else if(playingSiteMedia && !websiteWatchActive && isWatching && currentSiteTarget!=null) {
+                // If every leased native source fails, let the site's original player
+                // handle the same media without making the user restart playback.
+                panel.player.stop()
+                panel.root.visibility=View.GONE
+                sitePlayer.root.visibility=View.VISIBLE
+                val target=currentSiteTarget!!
+                websiteWatchActive=true
+                advertising.hidePlacement()
+                sitePlayer.show(target.first,target.second)
+                watchNotice.visibility=View.GONE
             }else if(this::watchNotice.isInitialized && isWatching) {
                 watchNotice.text=error
                 watchNotice.visibility=View.VISIBLE
@@ -683,6 +695,7 @@ class MainActivity:Activity() {
         val watchUrl="https://egyshow.com/watch?target_type=$kind&target_id=$id&embed=1"
         val model=VideoModel(watchUrl,title,"EGYSHOW",-1L,-1L,"",poster,"",false,kind=="channel")
         currentSiteGenre=genre
+        currentSiteTarget=kind to id
         sitePlaybackWorker.execute {
             val available=mutableListOf<StreamChoice>()
             var adHtml:String?=null
@@ -1102,11 +1115,13 @@ class MainActivity:Activity() {
                     .replace(Regex("\\s+")," ").trim().take(65)
                 val phrase=(if(trimmed.length>=5)trimmed
                     else (model.channel+" "+genre)).take(80)
-                val extractor=ServiceList.YouTube.getSearchExtractor(phrase)
-                extractor.fetchPage()
-                val fresh=extractor.initialPage.items
-                    .filterIsInstance<StreamInfoItem>()
-                    .map(::modelFrom)
+                val fresh=try{YoutubeFeedApi.search(phrase)}
+                    catch(_:Exception){
+                        val extractor=ServiceList.YouTube.getSearchExtractor(phrase)
+                        extractor.fetchPage()
+                        extractor.initialPage.items.filterIsInstance<StreamInfoItem>()
+                            .map(::modelFrom).filterNot{it.isLive}
+                    }
                     .filter { !it.isLive && it.url!=model.url &&
                         (categoryOf(it)==genre ||
                          (model.channel.isNotBlank() && it.channel==model.channel)) }
@@ -1694,6 +1709,9 @@ class MainActivity:Activity() {
     }
     override fun onDestroy() {
         ++currentToken
+        ++recommendationToken
+        recommendationWorker.shutdownNow()
+        sitePlaybackWorker.shutdownNow()
         if(this::siteSearch.isInitialized)siteSearch.dispose()
         if(this::sitePlayer.isInitialized)sitePlayer.dispose()
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
