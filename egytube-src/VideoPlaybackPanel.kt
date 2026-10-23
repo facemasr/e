@@ -38,7 +38,9 @@ internal class VideoPlaybackPanel(
     private val fullScreenChanged:(Boolean)->Unit,
     private val requestPip:()->Unit,
     private val expandMini:()->Unit,
-    private val onVideoOrientationChanged:(Boolean)->Unit
+    private val onVideoOrientationChanged:(Boolean)->Unit,
+    private val requestDownload:()->Unit,
+    private val requestShare:()->Unit
 ) {
     val player=ExoPlayer.Builder(activity).build()
     val root=FrameLayout(activity).apply { setBackgroundColor(Color.BLACK) }
@@ -61,6 +63,12 @@ internal class VideoPlaybackPanel(
     private lateinit var quality:TextView
     private lateinit var full:TextView
     private val title=TextView(activity)
+    private val subtitle=TextView(activity)
+    private var muted=false
+    private lateinit var volume:TextView
+    private lateinit var download:TextView
+    private lateinit var share:TextView
+    private var centerIsPlaying=false
     private val handler=Handler(Looper.getMainLooper())
     private var scrubbing=false
     private var expanded=false
@@ -110,6 +118,7 @@ internal class VideoPlaybackPanel(
             duration.text=if(d>0) Palette.formattedDuration(d/1000) else "0:00"
             if(!scrubbing) seek.progress=if(d>0) ((p*1000)/d).coerceIn(0,1000).toInt() else 0
             play.text=if(player.isPlaying) "Ⅱ" else "▶"
+            play.background=Palette.round(0x99000000.toInt(),dp(42).toFloat())
             handler.postDelayed(this,800)
         }
     }
@@ -160,62 +169,106 @@ internal class VideoPlaybackPanel(
         root.addView(watermark,FrameLayout.LayoutParams(-2,dp(36),Gravity.TOP or Gravity.END).apply {
             topMargin=dp(10);rightMargin=dp(10)
         })
-        val panel=LinearLayout(activity).apply { orientation=LinearLayout.VERTICAL }
+        // Full-frame custom controls; all controls float over the native video texture.
+        val panel=LinearLayout(activity).apply {
+            orientation=LinearLayout.VERTICAL
+            setPadding(dp(3),0,dp(3),dp(3))
+        }
         val top=LinearLayout(activity).apply {
             orientation=LinearLayout.HORIZONTAL
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
             gravity=Gravity.CENTER_VERTICAL
-            setBackgroundColor(0x8a000000.toInt())
+            setPadding(dp(7),dp(4),dp(7),dp(4))
+            setBackgroundColor(0xba050508.toInt())
         }
-        val back=button("‹",34f).apply { setOnClickListener { goBack() } }
-        top.addView(back,LinearLayout.LayoutParams(dp(52),dp(48)))
-        title.text="EGYTUBE";title.maxLines=1
-        title.ellipsize=android.text.TextUtils.TruncateAt.END
-        title.textSize=15f;title.setTextColor(Color.WHITE)
-        top.addView(title,LinearLayout.LayoutParams(0,-2,1f))
-        val pip=button("▣",19f).apply {
-            contentDescription="مشغل نافذة صغيرة فوق التطبيقات"
+        val back=button("➜",27f).apply {
+            contentDescription="العودة إلى الفيديوهات"
+            setOnClickListener { goBack() }
+        }
+        top.addView(back,LinearLayout.LayoutParams(dp(43),dp(48)))
+        val names=LinearLayout(activity).apply {
+            orientation=LinearLayout.VERTICAL
+            gravity=Gravity.CENTER_VERTICAL
+            setPadding(dp(8),0,dp(6),0)
+        }
+        title.apply {
+            text="EGYTUBE"
+            textSize=16.5f
+            maxLines=1
+            gravity=Gravity.RIGHT
+            ellipsize=android.text.TextUtils.TruncateAt.END
+            setTextColor(Color.WHITE)
+            typeface=Typeface.DEFAULT_BOLD
+        }
+        subtitle.apply {
+            text="مشغل فيديو"
+            textSize=11f
+            maxLines=1
+            gravity=Gravity.RIGHT
+            setTextColor(0xffc5c9d0.toInt())
+        }
+        names.addView(title)
+        names.addView(subtitle)
+        top.addView(names,LinearLayout.LayoutParams(0,-2,1f))
+        val pip=button("▣",20f).apply {
+            contentDescription="صورة داخل صورة للمحتوى المسموح"
             setOnClickListener { requestPip() }
         }
-        top.addView(pip,LinearLayout.LayoutParams(dp(42),dp(48)))
-        full=button("⛶",21f).apply { setOnClickListener { toggleFull() } }
-        top.addView(full,LinearLayout.LayoutParams(dp(46),dp(48)))
-        panel.addView(top,LinearLayout.LayoutParams(-1,dp(50)))
+        top.addView(pip,LinearLayout.LayoutParams(dp(43),dp(48)))
+        panel.addView(top,LinearLayout.LayoutParams(-1,dp(57)))
+
         val middle=LinearLayout(activity).apply {
             orientation=LinearLayout.HORIZONTAL
             gravity=Gravity.CENTER
+            setPadding(0,0,0,0)
         }
-        val previous=button("↶ 10",20f).apply {
-            setOnClickListener { player.seekTo((player.currentPosition-10000L).coerceAtLeast(0)); reveal() }
+        val previous=button("↶10",21f).apply {
+            contentDescription="الرجوع عشر ثوانٍ"
+            setOnClickListener {
+                player.seekTo((player.currentPosition-10000L).coerceAtLeast(0L))
+                reveal()
+            }
         }
         play=button("▶",29f).apply {
+            contentDescription="تشغيل أو إيقاف مؤقت"
+            background=Palette.round(0xa8000000.toInt(),dp(45).toFloat())
             setOnClickListener {
-                if(player.isPlaying) player.pause() else player.play()
+                if(player.isPlaying)player.pause() else player.play()
                 reveal()
             }
         }
-        val next=button("10 ↷",20f).apply {
+        val next=button("10↷",21f).apply {
+            contentDescription="التقدم عشر ثوانٍ"
             setOnClickListener {
-                val d=player.duration;val target=player.currentPosition+10000
-                player.seekTo(if(d>0) target.coerceAtMost(d) else target)
+                val d=player.duration
+                val target=player.currentPosition+10000L
+                player.seekTo(if(d>0)target.coerceAtMost(d) else target)
                 reveal()
             }
         }
-        middle.addView(previous,LinearLayout.LayoutParams(dp(86),dp(70)))
-        middle.addView(play,LinearLayout.LayoutParams(dp(86),dp(70)))
-        middle.addView(next,LinearLayout.LayoutParams(dp(86),dp(70)))
+        middle.addView(previous,LinearLayout.LayoutParams(dp(75),dp(68)))
+        middle.addView(play,LinearLayout.LayoutParams(dp(74),dp(68)))
+        middle.addView(next,LinearLayout.LayoutParams(dp(75),dp(68)))
         panel.addView(middle,LinearLayout.LayoutParams(-1,0,1f))
+
         val bottom=LinearLayout(activity).apply {
             orientation=LinearLayout.VERTICAL
-            setPadding(dp(5),dp(2),dp(5),dp(2))
-            setBackgroundColor(0x96000000.toInt())
+            setPadding(dp(7),dp(2),dp(7),dp(4))
+            setBackgroundColor(0xb8060608.toInt())
         }
         seek.progressTintList=android.content.res.ColorStateList.valueOf(Palette.RED)
+        seek.progressBackgroundTintList=android.content.res.ColorStateList.valueOf(0xff929292.toInt())
         seek.thumbTintList=android.content.res.ColorStateList.valueOf(Palette.RED)
         seek.max=1000
+        seek.setPadding(0,0,0,0)
         seek.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
-            override fun onStartTrackingTouch(b:SeekBar?) { scrubbing=true;handler.removeCallbacks(hideControls) }
-            override fun onProgressChanged(b:SeekBar?,p:Int,byUser:Boolean) {
-                if(byUser && player.duration>0) elapsed.text=Palette.formattedDuration(player.duration*p/1000/1000)
+            override fun onStartTrackingTouch(b:SeekBar?) {
+                scrubbing=true
+                handler.removeCallbacks(hideControls)
+            }
+            override fun onProgressChanged(b:SeekBar?,progress:Int,fromUser:Boolean) {
+                if(fromUser && player.duration>0)
+                    elapsed.text=Palette.formattedDuration(player.duration*progress/1000L/1000L)
             }
             override fun onStopTrackingTouch(b:SeekBar?) {
                 scrubbing=false
@@ -223,23 +276,55 @@ internal class VideoPlaybackPanel(
                 reveal()
             }
         })
-        bottom.addView(seek,LinearLayout.LayoutParams(-1,dp(32)))
-        val settings=LinearLayout(activity).apply {
+        bottom.addView(seek,LinearLayout.LayoutParams(-1,dp(24)))
+        val toolRow=LinearLayout(activity).apply {
             orientation=LinearLayout.HORIZONTAL
+            layoutDirection=View.LAYOUT_DIRECTION_LTR
             gravity=Gravity.CENTER_VERTICAL
         }
-        elapsed=button("0:00",12f)
-        duration=button("0:00",12f)
-        settings.addView(elapsed)
-        settings.addView(button("/",12f))
-        settings.addView(duration)
-        settings.addView(View(activity),LinearLayout.LayoutParams(0,1,1f))
-        speed=button("1×",13f).apply { setOnClickListener { showSpeeds() } }
-        quality=button("الجودة ⚙",13f).apply { setOnClickListener { chooseQuality();reveal() } }
-        settings.addView(speed)
-        settings.addView(quality)
-        bottom.addView(settings,LinearLayout.LayoutParams(-1,dp(40)))
-        panel.addView(bottom)
+        full=button("⛶",22f).apply {
+            contentDescription="تكبير حسب اتجاه الفيديو"
+            setOnClickListener { toggleFull() }
+        }
+        toolRow.addView(full,LinearLayout.LayoutParams(dp(40),dp(39)))
+        quality=button("⚙",23f).apply {
+            contentDescription="جودة الفيديو"
+            setOnClickListener { chooseQuality();reveal() }
+        }
+        toolRow.addView(quality,LinearLayout.LayoutParams(dp(40),dp(39)))
+        download=button("↓",24f).apply {
+            contentDescription="حفظ الفيديو على الجهاز"
+            setOnClickListener { requestDownload();reveal() }
+        }
+        toolRow.addView(download,LinearLayout.LayoutParams(dp(40),dp(39)))
+        share=button("↗",23f).apply {
+            contentDescription="مشاركة الفيديو"
+            setOnClickListener { requestShare();reveal() }
+        }
+        toolRow.addView(share,LinearLayout.LayoutParams(dp(40),dp(39)))
+        speed=button("1×",14f).apply {
+            contentDescription="تغيير سرعة التشغيل"
+            setOnClickListener { showSpeeds() }
+        }
+        toolRow.addView(speed,LinearLayout.LayoutParams(dp(40),dp(39)))
+        toolRow.addView(View(activity),LinearLayout.LayoutParams(0,1,1f))
+        elapsed=button("0:00",11f)
+        duration=button("0:00",11f)
+        toolRow.addView(elapsed)
+        toolRow.addView(button("/",11f))
+        toolRow.addView(duration)
+        volume=button("◖))",16f).apply {
+            contentDescription="كتم الصوت أو تشغيله"
+            setOnClickListener {
+                muted=!muted
+                player.volume=if(muted)0f else 1f
+                text=if(muted)"×♫" else "◖))"
+                reveal()
+            }
+        }
+        toolRow.addView(volume,LinearLayout.LayoutParams(dp(43),dp(39)))
+        bottom.addView(toolRow,LinearLayout.LayoutParams(-1,dp(42)))
+        panel.addView(bottom,LinearLayout.LayoutParams(-1,dp(68)))
         overlay.addView(panel,FrameLayout.LayoutParams(-1,-1))
         root.addView(overlay,FrameLayout.LayoutParams(-1,-1))
         player.addListener(object:Player.Listener {
@@ -278,6 +363,9 @@ internal class VideoPlaybackPanel(
         handler.postDelayed(hideControls,4500)
     }
     fun setTitle(value:String) { title.text=value }
+    fun setSubtitle(value:String) {
+        subtitle.text=if(value.isBlank())"EGYTUBE" else value
+    }
     fun attachAd(banner:AdvertisementBanner) {
         adBanner=banner
         val width=kotlin.math.min(dp(336),activity.resources.displayMetrics.widthPixels-dp(12))
