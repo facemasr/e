@@ -63,6 +63,7 @@ class MainActivity:Activity() {
     private lateinit var panel:VideoPlaybackPanel
     private lateinit var playerDetails:LinearLayout
     private lateinit var playerHost:LinearLayout
+    private lateinit var advertising:AdvertisementBanner
     private lateinit var footer:LinearLayout
     private lateinit var moreButton:TextView
     private var currentToken=0
@@ -118,6 +119,10 @@ class MainActivity:Activity() {
     }
 
     private fun buildUI() {
+        // Rebuilding the screen after country selection must release the old player and WebViews.
+        if(this::advertising.isInitialized) advertising.dispose()
+        if(this::panel.isInitialized) panel.release()
+        if(this::webResults.isInitialized) webResults.destroy()
         root=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
             setBackgroundColor(Palette.BG)
@@ -204,6 +209,10 @@ class MainActivity:Activity() {
         }
         playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,dp(233)))
         root.addView(playerHost,LinearLayout.LayoutParams(-1,-2))
+        // The ad is in page content, NOT on top of or inside the YouTube video/player.
+        advertising=AdvertisementBanner(this)
+        root.addView(advertising,LinearLayout.LayoutParams(-1,dp(86)))
+        advertising.display()
         playerDetails=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
             visibility=View.GONE
@@ -554,6 +563,7 @@ class MainActivity:Activity() {
         if(panel.exitFullIfNeeded())return
         ++currentToken
         panel.player.stop()
+        advertising.restore()
         isWatching=false
         playingModel=null
         playerHost.visibility=View.GONE
@@ -567,6 +577,7 @@ class MainActivity:Activity() {
         moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
     }
     private fun resizePlayer(fullscreen:Boolean) {
+        if(fullscreen)advertising.hideForFullScreen() else advertising.restore()
         header.visibility=if(fullscreen)View.GONE else View.VISIBLE
         footer.visibility=if(fullscreen)View.GONE else View.VISIBLE
         sectionTitle.visibility=if(fullscreen)View.GONE else View.VISIBLE
@@ -595,6 +606,7 @@ class MainActivity:Activity() {
         ++currentToken
         worker.shutdownNow()
         panel.release()
+        advertising.dispose()
         webResults.destroy()
         super.onDestroy()
     }
