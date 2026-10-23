@@ -26,7 +26,7 @@ internal class EgyshowNativeCatalog(
     private var moreAvailable=true
     private var displayedCount=0
     private var currentCardRow:LinearLayout?=null
-    private val cardWidth=((activity.resources.displayMetrics.widthPixels/d)-48f)/2f
+    private val cardWidth=((activity.resources.displayMetrics.widthPixels/activity.resources.displayMetrics.density)-48f)/2f
     private val d=activity.resources.displayMetrics.density
     private fun dp(n:Int)=(d*n).toInt()
     private fun text(value:String,size:Float=13f,bold:Boolean=false):TextView=TextView(activity).apply{
