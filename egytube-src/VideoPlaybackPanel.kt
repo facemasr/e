@@ -347,6 +347,8 @@ internal class VideoPlaybackPanel(
                 if(state==Player.STATE_READY)hideLater()
             }
             override fun onIsPlayingChanged(isPlaying:Boolean) {
+                // Native Android screen-on flag: awake only while the video is actually playing.
+                root.keepScreenOn=isPlaying && !pipMode
                 play.text=if(isPlaying)"Ⅱ" else "▶"
                 if(isPlaying)hideLater() else reveal(false)
             }
@@ -400,8 +402,10 @@ internal class VideoPlaybackPanel(
         if(active) {
             overlay.visibility=View.GONE
             watermark.visibility=View.GONE
+            root.keepScreenOn=false
             adBanner?.hidePlacement()
         } else if(!miniMode) {
+            root.keepScreenOn=player.isPlaying
             watermark.visibility=View.VISIBLE
             reveal()
         }
@@ -476,6 +480,7 @@ internal class VideoPlaybackPanel(
     }
     fun isExpanded()=expanded
     fun release() {
+        root.keepScreenOn=false
         activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         released=true
         adBanner?.hidePlacement()
