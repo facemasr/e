@@ -1,6 +1,8 @@
 package com.personal.ytplayer
 
 import android.app.Activity
+import android.app.DownloadManager
+import android.os.Environment
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -360,7 +362,9 @@ class MainActivity:Activity() {
             { portrait ->
                 portraitVideo=portrait
                 adjustNormalPlayerHeight()
-            }
+            },
+            { downloadActiveVideo() },
+            { shareActiveVideo() }
         )
         panel.playbackError={ error -> runOnUiThread {
             if(this::watchNotice.isInitialized && isWatching) {
@@ -852,6 +856,7 @@ class MainActivity:Activity() {
         extraResults.visibility=View.GONE
         adjustNormalPlayerHeight()
         panel.setTitle(model.title)
+        panel.setSubtitle(model.channel)
         webResults.visibility=View.GONE
         list.visibility=View.VISIBLE
         panel.player.stop()
@@ -955,6 +960,64 @@ class MainActivity:Activity() {
                 runOnUiThread { if(token==currentToken)status.text="تعذّر فتح الفيديو: "+(e.message?:"غير معروف") }
             }
         }
+    }
+
+    private fun shareActiveVideo() {
+        val item=playingModel ?:return
+        val intent=Intent(Intent.ACTION_SEND).apply {
+            type="text/plain"
+            putExtra(Intent.EXTRA_TEXT,item.title+"\n"+item.url)
+        }
+        startActivity(Intent.createChooser(intent,"مشاركة الفيديو"))
+    }
+    private fun downloadActiveVideo() {
+        val item=playingModel ?:return
+        val url=item.url.trim()
+        val uri=try {Uri.parse(url)}catch (_:Exception){null}
+        val path=uri?.path?.lowercase(Locale.ROOT).orEmpty()
+        // DownloadManager saves normal authorized progressive files. A YouTube watch page
+        // or a media playlist (HLS/DASH) must never be saved as a fake MP4 file.
+        val direct=uri?.scheme=="https" &&
+            (path.endsWith(".mp4") || path.endsWith(".webm") || path.endsWith(".m4v"))
+        val host=uri?.host.orEmpty().lowercase(Locale.ROOT)
+        val youtube=host=="youtu.be" || host=="youtube.com" || host.endsWith(".youtube.com") ||
+            host=="googlevideo.com" || host.endsWith(".googlevideo.com")
+        if(!direct || youtube) {
+            android.app.AlertDialog.Builder(this)
+                .setTitle("تنزيل الفيديو")
+                .setMessage("الحفظ المباشر متاح لملفات MP4 وWebM المصرح لك بتنزيلها. لا يدعم هذا الزر تنزيل فيديوهات يوتيوب أو بث HLS/DASH. يمكنك استخدام خيارات التنزيل الرسمية من الخدمة عند توفرها.")
+                .setPositiveButton("حسنًا",null).show()
+            return
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("حفظ الفيديو على الجهاز")
+            .setMessage("سيُحفظ الفيديو في مجلد التنزيلات على هاتفك. تابع فقط إذا كان لك حق تنزيل هذا المحتوى.")
+            .setNegativeButton("إلغاء",null)
+            .setPositiveButton("تحميل") { _,_ ->
+                try {
+                    val extension=when {
+                        path.endsWith(".webm")->"webm"
+                        path.endsWith(".m4v")->"m4v"
+                        else->"mp4"
+                    }
+                    val safe=item.title.filter{it.isLetterOrDigit() || it==' ' || it=='-' || it=='_' }
+                        .take(62).trim().ifBlank{"EGYTUBE_Video"}
+                    val name=safe+"_"+System.currentTimeMillis()+"."+extension
+                    val mime=if(extension=="webm")"video/webm" else "video/mp4"
+                    val request=DownloadManager.Request(uri!!)
+                        .setTitle(safe)
+                        .setDescription("EGYTUBE • حفظ ملف فيديو")
+                        .setMimeType(mime)
+                        .setAllowedOverMetered(true)
+                        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                        .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS,name)
+                    val manager=getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                    manager.enqueue(request)
+                    Toast.makeText(this,"بدأ تنزيل الفيديو إلى مجلد التنزيلات",Toast.LENGTH_LONG).show()
+                }catch(e:Exception){
+                    Toast.makeText(this,"تعذّر بدء التنزيل: "+e.javaClass.simpleName,Toast.LENGTH_LONG).show()
+                }
+            }.show()
     }
 
     private fun chooseQuality() {
