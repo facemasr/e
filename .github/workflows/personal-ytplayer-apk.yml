@@ -1,7 +1,7 @@
 name: Build Personal YT Player APK
 on:
   push:
-    branches: [personal-ytplayer-apk-build]
+    branches: [egytube-pro-ui-v030]
   workflow_dispatch:
 permissions:
   contents: read
