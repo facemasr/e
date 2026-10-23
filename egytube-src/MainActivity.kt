@@ -459,7 +459,8 @@ class MainActivity:Activity() {
             setPadding(dp(16),dp(9),dp(16),dp(9))
         }
         root.addView(playerDetails)
-        recommendedHeader=baseText("المزيد من نفس النوع",17f,true).apply {
+        recommendedHeader=baseText("المزيد من نفس النوع",17f,true,Color.WHITE).apply {
+            setBackgroundColor(0xff0f0f0f.toInt())
             gravity=Gravity.RIGHT
             setPadding(dp(16),dp(10),dp(16),dp(7))
             visibility=View.GONE
@@ -486,7 +487,7 @@ class MainActivity:Activity() {
             clipToPadding=false
             visibility=View.GONE
         }
-        sameTypeAdapter=VideoCardAdapter(this) { video->openPlayer(video) }
+        sameTypeAdapter=VideoCardAdapter(this,{ video->openPlayer(video) },true)
         sameTypeVideos.adapter=sameTypeAdapter
         root.addView(sameTypeVideos,LinearLayout.LayoutParams(-1,0,1f))
         siteRelated=EgyshowMediaShelves(this){ item->siteCatalog.openSearchHit(item) }
@@ -1103,17 +1104,58 @@ class MainActivity:Activity() {
         if(!playingSiteMedia && !pipAuthorizedSource)populateYoutubeRecommendations(model)
         playerDetails.visibility=View.VISIBLE
         playerDetails.removeAllViews()
+        playerDetails.setBackgroundColor(if(playingSiteMedia)Color.WHITE else 0xff0f0f0f.toInt())
         // Error notices are displayed only if playback actually fails.
         // Avoid permanent loading/status messages under the action buttons.
-        watchNotice=baseText("",12f,false,Palette.SECOND).apply {
+        watchNotice=baseText("",12f,false,if(playingSiteMedia)Palette.SECOND else 0xffbbbbbb.toInt()).apply {
             visibility=View.GONE
             setPadding(0,dp(5),0,dp(6))
         }
-        val name=baseText(model.title,18f,true).apply { maxLines=3 }
+        val name=baseText(model.title,18f,true,if(playingSiteMedia)Palette.WHITE else Color.WHITE).apply {
+            maxLines=3
+            gravity=Gravity.RIGHT
+            textDirection=View.TEXT_DIRECTION_FIRST_STRONG
+        }
         playerDetails.addView(name)
-        playerDetails.addView(baseText(model.channel +
+        val channelRow=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
+            gravity=Gravity.CENTER_VERTICAL
+            setPadding(0,dp(11),0,dp(11))
+        }
+        if(!playingSiteMedia && model.avatar.startsWith("https://")) {
+            val avatar=ImageView(this).apply {
+                scaleType=ImageView.ScaleType.CENTER_CROP
+                background=Palette.round(0xff363636.toInt(),dp(19).toFloat())
+                clipToOutline=true
+            }
+            Thumbnails.show(avatar,model.avatar)
+            channelRow.addView(avatar,LinearLayout.LayoutParams(dp(38),dp(38)).apply {
+                leftMargin=dp(10)
+            })
+        }
+        val detail=baseText(model.channel +
             (if(model.views>=0) "  •  "+Palette.count(model.views)+" مشاهدة" else ""),
-            13f,false,Palette.SECOND).apply {setPadding(0,dp(6),0,dp(6))})
+            13f,false,if(playingSiteMedia)Palette.SECOND else 0xffbdbdbd.toInt()).apply {
+            gravity=Gravity.RIGHT or Gravity.CENTER_VERTICAL
+            maxLines=2
+        }
+        channelRow.addView(detail,LinearLayout.LayoutParams(0,-1,1f))
+        if(!playingSiteMedia) {
+            val saved=getSharedPreferences("egytube_library",0)
+                .getStringSet("saved_urls",emptySet()).orEmpty().contains(model.url)
+            channelRow.addView(clickable(if(saved)"✓ محفوظ" else "＋ حفظ",{
+                val prefs=getSharedPreferences("egytube_library",0)
+                val urls=prefs.getStringSet("saved_urls",emptySet()).orEmpty().toMutableSet()
+                if(urls.contains(model.url))urls.remove(model.url) else urls.add(model.url)
+                prefs.edit().putStringSet("saved_urls",urls).apply()
+                Toast.makeText(this,if(urls.contains(model.url))"أُضيف إلى المشاهدة لاحقًا" else "أُزيل من المحفوظات",Toast.LENGTH_SHORT).show()
+            }).apply{
+                setTextColor(Color.WHITE)
+                background=Palette.round(0xff282828.toInt(),dp(22).toFloat())
+            },LinearLayout.LayoutParams(-2,dp(39)))
+        }
+        playerDetails.addView(channelRow)
         val actions=HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled=false
             layoutDirection=View.LAYOUT_DIRECTION_RTL
@@ -1124,12 +1166,17 @@ class MainActivity:Activity() {
             gravity=Gravity.CENTER_VERTICAL
             setPadding(0,dp(6),0,dp(6))
         }
-        row.addView(clickable("↗  مشاركة",{shareActiveVideo()}),
-            LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
-        row.addView(clickable("⧉  نسخ الرابط",{copyActiveVideoLink()}),
-            LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
-        row.addView(clickable("↓  تحميل",{downloadActiveVideo()}),
-            LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
+        fun actionChip(label:String,click:()->Unit) {
+            row.addView(clickable(label,click).apply {
+                if(!playingSiteMedia){
+                    setTextColor(Color.WHITE)
+                    background=Palette.round(0xff292929.toInt(),dp(23).toFloat())
+                }
+            },LinearLayout.LayoutParams(-2,dp(43)).apply {rightMargin=dp(7)})
+        }
+        actionChip("↗  مشاركة"){shareActiveVideo()}
+        actionChip("⧉  نسخ الرابط"){copyActiveVideoLink()}
+        actionChip("↓  تحميل"){downloadActiveVideo()}
         actions.addView(row)
         playerDetails.addView(actions,LinearLayout.LayoutParams(-1,dp(62)))
         playerDetails.addView(watchNotice)
