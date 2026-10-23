@@ -95,14 +95,13 @@ internal class VideoCardAdapter(
     override fun onCreateViewHolder(parent:ViewGroup,viewType:Int):Holder {
         val outer=LinearLayout(activity).apply {
             orientation=LinearLayout.VERTICAL
-            setPadding(dp(10),dp(9),dp(10),dp(14))
+            setPadding(0,dp(6),0,dp(16))
             setBackgroundColor(Color.WHITE)
         }
-        val width=activity.resources.displayMetrics.widthPixels - dp(20)
+        val width=activity.resources.displayMetrics.widthPixels
         val imgHeight = width * 9 / 16
         val frame=FrameLayout(activity).apply {
-            background=Palette.round(Palette.SURFACE,dp(16).toFloat())
-            clipToOutline=true
+            setBackgroundColor(Palette.SURFACE)
         }
         val cover=ImageView(activity).apply {
             scaleType=ImageView.ScaleType.CENTER_CROP
@@ -123,7 +122,8 @@ internal class VideoCardAdapter(
         val info=LinearLayout(activity).apply {
             orientation=LinearLayout.HORIZONTAL
             gravity=Gravity.TOP
-            setPadding(dp(2),dp(12),dp(2),0)
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
+            setPadding(dp(13),dp(11),dp(12),dp(12))
         }
         val avatarFrame=FrameLayout(activity).apply {
             background=Palette.round(0xffe6e7ec.toInt(), dp(40).toFloat())
@@ -134,19 +134,24 @@ internal class VideoCardAdapter(
         info.addView(avatarFrame,LinearLayout.LayoutParams(dp(40),dp(40)))
         val texts=LinearLayout(activity).apply {
             orientation=LinearLayout.VERTICAL
-            setPadding(dp(12),0,dp(4),0)
+            setPadding(dp(12),0,dp(8),0)
+            gravity=Gravity.RIGHT
         }
         val name=TextView(activity).apply {
             textSize=16f
             typeface=Typeface.DEFAULT_BOLD
             setTextColor(Palette.WHITE)
             maxLines=2
+            gravity=Gravity.RIGHT
+            textDirection=View.TEXT_DIRECTION_FIRST_STRONG
             ellipsize=android.text.TextUtils.TruncateAt.END
         }
         val details=TextView(activity).apply {
             textSize=12.5f
             setTextColor(Palette.SECOND)
             maxLines=2
+            gravity=Gravity.RIGHT
+            textDirection=View.TEXT_DIRECTION_FIRST_STRONG
             setPadding(0,dp(6),0,0)
         }
         texts.addView(name)
@@ -159,6 +164,8 @@ internal class VideoCardAdapter(
         }
         info.addView(more, LinearLayout.LayoutParams(dp(26),dp(45)))
         outer.addView(info)
+        outer.addView(View(activity).apply {setBackgroundColor(0xfff1f1f1.toInt())},
+            LinearLayout.LayoutParams(-1,dp(1)))
         return Holder(outer,cover,avatar,name,details,duration,more)
     }
     override fun onBindViewHolder(h:Holder,position:Int) {
