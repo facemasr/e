@@ -34,7 +34,7 @@ internal class BackgroundPlaybackService:Service() {
         val title=intent?.getStringExtra("title").orEmpty().take(60).ifBlank{"فيديو مسموح"}
         val open=PendingIntent.getActivity(this,0,
             Intent(this,MainActivity::class.java).apply{
-                flags=Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                this.flags=Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
             },PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification=Notification.Builder(this,CHANNEL)
             .setSmallIcon(android.R.drawable.ic_media_play)
