@@ -3,6 +3,9 @@ package com.personal.ytplayer
 import android.app.Activity
 import android.app.DownloadManager
 import android.os.Environment
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -67,6 +70,9 @@ class MainActivity:Activity() {
     private val extraItems=mutableListOf<InfoItem>()
     private lateinit var extraResults:HorizontalScrollView
     private lateinit var shortSeriesSlider:ShortSeriesCarousel
+    private lateinit var siteCatalog:EgyshowNativeCatalog
+    private var siteCatalogActive=false
+    private var currentSiteCategory="movie"
     private lateinit var extraRow:LinearLayout
     private var typeFilter="الكل"
     private var sortMode="الملاءمة"
@@ -209,7 +215,9 @@ class MainActivity:Activity() {
     }
 
     private fun buildUI() {
+        if(this::siteCatalog.isInitialized)siteCatalog.dispose()
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
+        siteCatalogActive=false
         miniActive=false
         inPip=false
         // Rebuilding the screen after country selection must release the old player and WebViews.
@@ -460,6 +468,10 @@ class MainActivity:Activity() {
             }
         }
         root.addView(webResults,LinearLayout.LayoutParams(-1,0,1f))
+        siteCatalog=EgyshowNativeCatalog(this) { kind,id,title,poster ->
+            playEgyshowContent(kind,id,title,poster)
+        }
+        root.addView(siteCatalog.root,LinearLayout.LayoutParams(-1,0,1f))
         moreButton=baseText("عرض المزيد",14f,true,Palette.SECOND).apply {
             gravity=Gravity.CENTER
             setPadding(0,dp(6),0,dp(6))
@@ -491,6 +503,7 @@ class MainActivity:Activity() {
         tab("▤","Shorts"){if(isWatching)leavePlayer();showShorts()}
         tab("≡","الاشتراكات"){if(isWatching)leavePlayer();showSubscriptions()}
         tab("◉","أنت"){if(isWatching)leavePlayer();showLibrary()}
+        tab("▣","EGYSHOW"){if(isWatching)leavePlayer();showEgyshowCatalog("movie")}
         root.addView(footer,LinearLayout.LayoutParams(-1,dp(64)))
         // A stable full-window stage keeps a floating in-app mini-player and PiP surface.
         screen=FrameLayout(this).apply {setBackgroundColor(Palette.BG)}
@@ -560,6 +573,95 @@ class MainActivity:Activity() {
         val id=url.getQueryParameter("egy")?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))} ?:return
         openPlayer(VideoModel("https://www.youtube.com/watch?v="+id,
             "فيديو يوتيوب","",-1L,-1L,"","","",false,false))
+    }
+    private fun showEgyshowCatalog(kind:String) {
+        if(isWatching)leavePlayer()
+        siteCatalogActive=true
+        currentSiteCategory=kind
+        if(miniActive)miniHost.visibility=View.VISIBLE
+        siteCatalog.show(kind)
+        searchRow.visibility=View.GONE
+        categories.visibility=View.GONE
+        shortSeriesSlider.root.visibility=View.GONE
+        sectionTitle.visibility=View.GONE
+        status.visibility=View.GONE
+        searchTools.visibility=View.GONE
+        extraResults.visibility=View.GONE
+        list.visibility=View.GONE
+        webResults.visibility=View.GONE
+        moreButton.visibility=View.GONE
+    }
+    private fun requestSiteJson(path:String,body:JSONObject?=null):JSONObject {
+        val conn=URL("https://egyshow.com"+path).openConnection() as HttpURLConnection
+        conn.connectTimeout=10000
+        conn.readTimeout=18000
+        conn.setRequestProperty("Accept","application/json")
+        if(body!=null) {
+            conn.requestMethod="POST"
+            conn.doOutput=true
+            conn.setRequestProperty("Content-Type","application/json")
+            conn.outputStream.use{it.write(body.toString().toByteArray(Charsets.UTF_8))}
+        }
+        try {
+            val code=conn.responseCode
+            val raw=(if(code in 200..299)conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use{it.readText()}.orEmpty()
+            val result=try{JSONObject(raw)}catch(_:Exception){JSONObject()}
+            if(code==401||code==403)throw IllegalStateException("يستلزم المحتوى تسجيل الدخول أو صلاحية المشاهدة؛ يجب استخدام حساب EGYSHOW المعتمد.")
+            if(code !in 200..299)throw IllegalStateException(result.optString("error","خطأ تشغيل $code"))
+            return result
+        }finally{conn.disconnect()}
+    }
+    private fun playEgyshowContent(kind:String,id:Long,title:String,poster:String){
+        if(id<=0L || !listOf("movie","episode","channel").contains(kind))return
+        Toast.makeText(this,"جارٍ التحقق من صلاحيات المشاهدة...",Toast.LENGTH_SHORT).show()
+        val token=++currentToken
+        worker.execute{
+            try{
+                val context=requestSiteJson("/api/v1/player/context?target_type=$kind&target_id=$id")
+                val sources=context.optJSONArray("sources")
+                    ?:throw IllegalStateException("لا توجد سيرفرات مشاهدة")
+                var choice:StreamChoice?=null
+                var reason="لم يتوفر مصدر فيديو مناسب"
+                for(i in 0 until kotlin.math.min(sources.length(),3)){
+                    val source=sources.optJSONObject(i)?:continue
+                    val sourceId=source.optLong("id",0)
+                    if(sourceId<=0L || source.optInt("is_active",1)==0)continue
+                    try {
+                        val lease=requestSiteJson("/api/v1/player/source/$sourceId/lease",
+                            JSONObject().put("target_type",kind).put("target_id",id)
+                                .put("allow_failover",true))
+                        val raw=lease.optString("playUrl")
+                        val resolved=if(raw.startsWith("/"))"https://egyshow.com"+raw else raw
+                        val uri=Uri.parse(resolved)
+                        if(uri.scheme!="https" || uri.host.isNullOrBlank())continue
+                        val type=lease.optString("type").lowercase(Locale.ROOT)
+                        val mime=when(type) {
+                            "hls"->MimeTypes.APPLICATION_M3U8
+                            "dash"->MimeTypes.APPLICATION_MPD
+                            "video"->null
+                            else->{reason="نوع المصدر $type لا يدعمه المشغل الأصلي";continue}
+                        }
+                        choice=StreamChoice("EGYSHOW • "+source.optString("server_name","مصدر"),resolved,null,mime)
+                        break
+                    }catch(e:Exception){reason=e.message?:reason}
+                }
+                val selected=choice?:throw IllegalStateException(reason)
+                runOnUiThread{
+                    if(isDestroyed||token!=currentToken)return@runOnUiThread
+                    val media=VideoModel(selected.url,title,"EGYSHOW",-1L,-1L,"",poster,"",false,kind=="channel")
+                    openPlayer(media,selected)
+                }
+            }catch(e:Exception){
+                runOnUiThread{
+                    if(!isDestroyed&&token==currentToken)
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle("تعذّر تشغيل محتوى إيجي شو")
+                            .setMessage(e.message?:"تعذّر الاتصال بالمصدر")
+                            .setPositiveButton("حسنًا",null).show()
+                }
+            }
+        }
     }
     private fun showSearch() {
         if(isWatching)leavePlayer()
@@ -743,6 +845,12 @@ class MainActivity:Activity() {
         list.visibility=View.VISIBLE
     }
     private fun loadTrending() {
+        siteCatalogActive=false
+        if(this::siteCatalog.isInitialized)siteCatalog.hide()
+        searchTools.visibility=View.VISIBLE
+        sectionTitle.visibility=View.VISIBLE
+        status.visibility=View.VISIBLE
+        list.visibility=View.VISIBLE
         shortSeriesSlider.root.visibility=View.VISIBLE
         categories.visibility=View.VISIBLE
         resetWebFallback()
@@ -869,8 +977,8 @@ class MainActivity:Activity() {
         }
     }
 
-    private fun openPlayer(model:VideoModel) {
-        pipAuthorizedSource=model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
+    private fun openPlayer(model:VideoModel, explicitSiteSource:StreamChoice?=null) {
+        pipAuthorizedSource=explicitSiteSource!=null || model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
         // If a prior video is playing in the mini view, return the same video surface
         // to the standard player before beginning the selected video.
         if(miniActive) {
@@ -881,6 +989,7 @@ class MainActivity:Activity() {
         }
         playingModel=model
         shortSeriesSlider.root.visibility=View.GONE
+        if(this::siteCatalog.isInitialized)siteCatalog.hide()
         lastRecordedUrl=null
         portraitVideo=false
         isWatching=true
@@ -958,6 +1067,11 @@ class MainActivity:Activity() {
         list.scrollToPosition(0)
         sourceOptions.clear();currentQuality=-1
         val token=++currentToken
+        if(explicitSiteSource!=null) {
+            sourceOptions.add(explicitSiteSource)
+            selectQuality(0)
+            return
+        }
         if(pipAuthorizedSource) {
             val url=model.url
             val mime=when {
@@ -1277,6 +1391,7 @@ class MainActivity:Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if(isWatching)leavePlayer()
+        else if(siteCatalogActive){siteCatalogActive=false;siteCatalog.hide();loadTrending()}
         else if(webMode) {
             if(webResults.canGoBack())webResults.goBack()
             else {resetWebFallback();customTerm=null;loadTrending()}
@@ -1287,6 +1402,7 @@ class MainActivity:Activity() {
     override fun onDestroy() {
         ++currentToken
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
+        if(this::siteCatalog.isInitialized)siteCatalog.dispose()
         worker.shutdownNow()
         panel.release()
         advertising.dispose()
