@@ -429,6 +429,8 @@ class MainActivity:Activity() {
                     val uri=request?.url ?: return false
                     if(!request.isForMainFrame)return false
                     val host=uri.host.orEmpty().lowercase(Locale.ROOT)
+                    // Let our own short-series catalog and episode pages navigate inside WebView.
+                    if(host=="egyshow.com" || host=="www.egyshow.com")return false
                     if(!(host=="youtube.com" || host.endsWith(".youtube.com") || host=="youtu.be"))return true
                     val id=when {
                         host=="youtu.be" -> uri.lastPathSegment
