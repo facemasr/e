@@ -64,6 +64,7 @@ class MainActivity:Activity() {
     private val worker=Executors.newSingleThreadExecutor()
     private val recommendationWorker=Executors.newSingleThreadExecutor()
     private var recommendationToken=0
+    private lateinit var recommendedHeader:TextView
     private lateinit var sameTypeVideos:RecyclerView
     private lateinit var sameTypeAdapter:VideoCardAdapter
     private lateinit var siteHomeSlider:EgyshowMediaShelves
@@ -458,6 +459,12 @@ class MainActivity:Activity() {
             setPadding(dp(16),dp(9),dp(16),dp(9))
         }
         root.addView(playerDetails)
+        recommendedHeader=baseText("المزيد من نفس النوع",17f,true).apply {
+            gravity=Gravity.RIGHT
+            setPadding(dp(16),dp(10),dp(16),dp(7))
+            visibility=View.GONE
+        }
+        root.addView(recommendedHeader)
 
         list=RecyclerView(this).apply {
             layoutManager=LinearLayoutManager(this@MainActivity)
@@ -737,7 +744,7 @@ class MainActivity:Activity() {
             }.show()
     }
     private fun chooseType() {
-        val values=arrayOf("الكل","فيديوهات","مباشر","القنوات","قوائم التشغيل")
+        val values=arrayOf("الكل","فيديوهات")
         android.app.AlertDialog.Builder(this).setTitle("تصفية الصفحة الحالية")
             .setSingleChoiceItems(values,values.indexOf(typeFilter)){dialog,which->
                 typeFilter=values[which];applyFilters();dialog.dismiss()
@@ -765,11 +772,8 @@ class MainActivity:Activity() {
         return amount*multiplier
     }
     private fun applyFilters() {
-        val selected=when(typeFilter) {
-            "مباشر" -> cachedVideos.filter {it.isLive}
-            "القنوات","قوائم التشغيل" -> emptyList()
-            else -> cachedVideos.toList()
-        }
+        // YouTube live and upcoming live streams must never appear in any video feed.
+        val selected=cachedVideos.filterNot{it.isLive}
         val sorted=when(sortMode) {
             "الأكثر مشاهدة" -> selected.sortedByDescending{it.views}
             "الأحدث تقريبًا" -> selected.sortedBy{approximateAge(it.published)}
@@ -781,14 +785,8 @@ class MainActivity:Activity() {
         if(!isWatching && customTerm.isNullOrBlank()) sectionTitle.text=homeTitle()
         adapter.replaceAll(sorted)
         extraRow.removeAllViews()
-        val extra=extraItems.filter{
-            when(typeFilter) {
-                "القنوات" -> it is ChannelInfoItem
-                "قوائم التشغيل" -> it is PlaylistInfoItem
-                "الكل" -> it is ChannelInfoItem || it is PlaylistInfoItem
-                else -> false
-            }
-        }
+        // Video-only YouTube mode: no channel/playlist browser that can expose live broadcasts.
+        val extra=emptyList<InfoItem>()
         extra.take(12).forEach { item ->
             val prefix=if(item is ChannelInfoItem)"قناة" else "قائمة"
             extraRow.addView(clickable(prefix+" • "+item.name,{
@@ -828,23 +826,15 @@ class MainActivity:Activity() {
         )
 
     private fun displayWebFallback(term:String?, trending:Boolean) {
-        extraItems.clear()
+        // Old YouTube WebView fallback could display live streams. Disallow it.
+        webMode=false
+        webResults.stopLoading()
+        webResults.visibility=View.GONE
+        list.visibility=View.VISIBLE
         extraResults.visibility=View.GONE
-        webMode=true
-        list.visibility=View.GONE
-        webResults.visibility=View.VISIBLE
+        adapter.replaceAll(emptyList())
+        status.text="تعذّر جلب الفيديوهات الآن. جرّب البحث مرة أخرى؛ البث المباشر غير متاح في التطبيق."
         moreButton.visibility=View.GONE
-        val url=if(trending)
-            "https://m.youtube.com/?gl="+Uri.encode(country)+"&hl=ar"
-        else "https://m.youtube.com/results?search_query="+Uri.encode(term.orEmpty())+
-            "&gl="+Uri.encode(country)+"&hl=ar"
-        if(trending) {
-            sectionTitle.text=homeTitle()
-            status.text="تعذّر جلب المقترحات. عرضنا صفحة استكشاف الفيديوهات بديلًا؛ لا تمثل قائمة الأكثر مشاهدة."
-        } else {
-            status.text="تعذّر استخراج نتائج البحث؛ عُرضت صفحة نتائج يوتيوب داخل التطبيق كبديل."
-        }
-        webResults.loadUrl(url)
     }
     private fun resetWebFallback() {
         webMode=false
@@ -876,7 +866,8 @@ class MainActivity:Activity() {
                 val extractor=ServiceList.YouTube.kioskList.defaultKioskExtractor
                 extractor.fetchPage()
                 val page=extractor.initialPage
-                val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom)
+                val videos=page.items.filterIsInstance<StreamInfoItem>()
+                    .map(::modelFrom).filterNot{it.isLive}
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false
@@ -945,8 +936,9 @@ class MainActivity:Activity() {
                 val extractor=ServiceList.YouTube.getSearchExtractor(term)
                 extractor.fetchPage()
                 val page=extractor.initialPage
-                val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom)
-                val others=page.items.filter{it is ChannelInfoItem || it is PlaylistInfoItem}
+                val videos=page.items.filterIsInstance<StreamInfoItem>()
+                    .map(::modelFrom).filterNot{it.isLive}
+                val others=emptyList<InfoItem>()
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false;currentExtractor=extractor;nextPage=page.nextPage
@@ -975,12 +967,13 @@ class MainActivity:Activity() {
         worker.execute {
             try {
                 val page=ex.getPage(pg)
-                val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom)
+                val videos=page.items.filterIsInstance<StreamInfoItem>()
+                    .map(::modelFrom).filterNot{it.isLive}
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false;nextPage=page.nextPage
                     cachedVideos.addAll(videos)
-                    extraItems.addAll(page.items.filter{it is ChannelInfoItem || it is PlaylistInfoItem})
+                    // Do not present channels/playlists or live streams in YouTube mode.
                     applyFilters()
                     moreButton.text="عرض المزيد"
                     moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
@@ -996,6 +989,10 @@ class MainActivity:Activity() {
 
     private fun openPlayer(model:VideoModel, explicitSiteSource:StreamChoice?=null,
                            managedAdHtml:String?=null,siteTarget:Pair<String,Long>?=null) {
+        if(siteTarget==null && model.isLive) {
+            Toast.makeText(this,"بث يوتيوب المباشر غير متاح. يعرض التطبيق الفيديوهات فقط.",Toast.LENGTH_LONG).show()
+            return
+        }
         // Keep the original native EGYTUBE / NewPipe+Media3 engine for every YouTube clip.
         // The website's own /watch player is ONLY used for EGYSHOW films, episodes and channels.
         websiteWatchActive=siteTarget!=null
@@ -1086,7 +1083,6 @@ class MainActivity:Activity() {
         val token=++currentToken
         if(siteTarget!=null) {
             // EGYSHOW owns its player UI, ad slots and server selection.
-            // Hide irrelevant YouTube recommendations below its watch page.
             list.visibility=View.GONE
             sitePlayer.show(siteTarget.first,siteTarget.second)
             return
@@ -1111,6 +1107,8 @@ class MainActivity:Activity() {
         worker.execute {
             try {
                 val info=StreamInfo.getInfo(model.url)
+                if(info.streamType.toString().contains("LIVE",true))
+                    throw IllegalStateException("البث المباشر ليوتيوب غير مسموح في التطبيق")
                 if(info.ageLimit>0) throw IllegalStateException("الفيديو مقيّد بالعمر")
                 val opts=mutableListOf<StreamChoice>()
                 info.videoStreams.filter { it.isUrl && it.content.startsWith("https://") }
