@@ -1,8 +1,6 @@
 package com.personal.ytplayer
 
 import android.app.Activity
-import android.content.Intent
-import android.net.Uri
 import android.graphics.Color
 import android.graphics.Typeface
 import android.view.Gravity
@@ -12,148 +10,181 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
-import org.jsoup.Jsoup
+import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
-/** Carousel of real EGYSHOW short-series listings. No hard-coded fake posters or items. */
+/**
+ * Genuine YouTube short-drama video recommendations.
+ * Unlike earlier versions, this component never requests EGYSHOW website content.
+ */
 internal class ShortSeriesCarousel(
     private val activity:Activity,
-    private val onOpen:(String)->Unit
+    private val onVideo:(VideoModel)->Unit,
+    private val onShowAll:()->Unit
 ) {
+    private val executor=Executors.newSingleThreadExecutor()
+    private val closed=AtomicBoolean(false)
+    private fun dp(value:Int)=Palette.dp(activity,value)
+    private val status=TextView(activity).apply {
+        text="جارٍ البحث عن مسلسلات قصيرة على يوتيوب..."
+        textSize=12f
+        setTextColor(Palette.SECOND)
+        gravity=Gravity.RIGHT
+        setPadding(dp(13),dp(4),dp(13),dp(10))
+    }
     val root=LinearLayout(activity).apply {
         orientation=LinearLayout.VERTICAL
         setBackgroundColor(Color.WHITE)
-        setPadding(0,8,0,12)
+        setPadding(0,dp(3),0,dp(12))
     }
-    private val executor=Executors.newSingleThreadExecutor()
     private val cards=LinearLayout(activity).apply {
         orientation=LinearLayout.HORIZONTAL
         layoutDirection=View.LAYOUT_DIRECTION_RTL
-        setPadding(dp(10),0,dp(10),0)
+        setPadding(dp(12),dp(4),dp(12),0)
     }
-    private val slider=HorizontalScrollView(activity).apply {
-        isHorizontalScrollBarEnabled=false
-        isFillViewport=false
-        layoutDirection=View.LAYOUT_DIRECTION_RTL
-        addView(cards)
-    }
-    private val status=TextView(activity).apply {
-        text="جارٍ جلب المسلسلات القصيرة من إيجي شو..."
-        setTextColor(Palette.SECOND)
-        textSize=12f
-        setPadding(dp(14),dp(4),dp(14),dp(8))
-    }
-    private fun dp(v:Int)=Palette.dp(activity,v)
-    private data class Series(val url:String,val title:String,val poster:String)
     init {
-        val header=LinearLayout(activity).apply {
+        val head=LinearLayout(activity).apply {
             orientation=LinearLayout.HORIZONTAL
             layoutDirection=View.LAYOUT_DIRECTION_RTL
             gravity=Gravity.CENTER_VERTICAL
-            setPadding(dp(13),dp(9),dp(12),dp(8))
+            setPadding(dp(13),dp(6),dp(11),dp(5))
         }
-        header.addView(TextView(activity).apply {
-            text="المسلسلات القصيرة"
+        head.addView(TextView(activity).apply {
+            text="مسلسلات قصيرة من يوتيوب"
+            textSize=18.5f
             setTextColor(Palette.WHITE)
-            textSize=19f
             typeface=Typeface.DEFAULT_BOLD
-        },LinearLayout.LayoutParams(0,dp(40),1f))
-        val all=TextView(activity).apply {
+            gravity=Gravity.CENTER_VERTICAL
+        }, LinearLayout.LayoutParams(0,dp(39),1f))
+        head.addView(TextView(activity).apply {
             text="عرض الكل ←"
-            setTextColor(0xffcf2035.toInt())
             textSize=13f
-            gravity=Gravity.CENTER
-            setOnClickListener { onOpen("https://egyshow.com/ar/short-series") }
-        }
-        header.addView(all,LinearLayout.LayoutParams(-2,dp(40)))
-        root.addView(header)
+            setTextColor(0xffdc2236.toInt())
+            gravity=Gravity.CENTER_VERTICAL
+            setOnClickListener { onShowAll() }
+        }, LinearLayout.LayoutParams(-2,dp(39)))
+        root.addView(head)
         root.addView(status)
-        root.addView(slider,LinearLayout.LayoutParams(-1,dp(222)))
+        val scroll=HorizontalScrollView(activity).apply {
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
+            isHorizontalScrollBarEnabled=false
+            isFillViewport=false
+            addView(cards)
+        }
+        root.addView(scroll,LinearLayout.LayoutParams(-1,dp(228)))
+        root.visibility=View.VISIBLE
     }
+    private fun asVideo(info:StreamInfoItem)=VideoModel(
+        info.url,info.name,info.uploaderName.orEmpty(),
+        info.viewCount,info.duration,info.textualUploadDate.orEmpty(),
+        info.thumbnails.maxByOrNull{it.width.coerceAtLeast(0)}?.url.orEmpty(),
+        info.uploaderAvatars.firstOrNull()?.url.orEmpty(),
+        info.isUploaderVerified,
+        info.streamType.toString().contains("LIVE",true)
+    )
     fun load() {
+        if(closed.get())return
+        status.text="جارٍ عرض حلقات المسلسلات القصيرة من يوتيوب..."
+        status.visibility=View.VISIBLE
         executor.execute {
-            try {
-                val site="https://egyshow.com/ar/short-series"
-                val doc=Jsoup.connect(site)
-                    .userAgent("Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 Chrome/127.0 Mobile Safari/537.36")
-                    .referrer("https://egyshow.com/")
-                    .timeout(14000).get()
-                val seen=mutableSetOf<String>()
-                val series=doc.select("a[href]").mapNotNull { anchor ->
-                    val url=anchor.absUrl("href").substringBefore("#").substringBefore("?")
-                    val parsed=Uri.parse(url)
-                    val pathname=parsed.path.orEmpty()
-                    if(parsed.scheme!="https" || parsed.host!="egyshow.com" ||
-                        !pathname.startsWith("/ar/short-series/") ||
-                        pathname.removePrefix("/ar/short-series/").isBlank() ||
-                        !seen.add(url))return@mapNotNull null
-                    // EGYSHOW posters are sibling elements inside <article>, not
-                    // children of the title/detail anchor.
-                    val card=anchor.closest("article")
-                    val posterEl=anchor.selectFirst("img") ?: card?.selectFirst("img.poster-art, img")
-                    val image=if(posterEl==null)"" else {
-                        listOf("data-src","data-lazy-src","src","data-original")
-                            .firstNotNullOfOrNull { key ->
-                                val raw=posterEl.attr(key)
-                                if(raw.isBlank() || raw.startsWith("data:"))null else {
-                                    val resolved=posterEl.absUrl(key)
-                                    if(resolved.startsWith("https://"))resolved else null
-                                }
-                            }.orEmpty()
+            val seen=mutableSetOf<String>()
+            val videos=mutableListOf<VideoModel>()
+            val phrases=listOf(
+                "مسلسل قصير الحلقة 1 دراما",
+                "دراما قصيرة مدبلجة الحلقة الأولى",
+                "مسلسلات قصيرة حلقات كاملة"
+            )
+            for (phrase in phrases) {
+                if(closed.get())return@execute
+                try {
+                    // The same YouTube extractor that powers EGYTUBE's search page.
+                    val extractor=ServiceList.YouTube.getSearchExtractor(phrase)
+                    extractor.fetchPage()
+                    val found=extractor.initialPage.items.filterIsInstance<StreamInfoItem>()
+                        .filter{ it.url.startsWith("https://") &&
+                                 it.name.isNotBlank() &&
+                                 !it.streamType.toString().contains("LIVE",true)}
+                        .map(::asVideo)
+                    found.forEach { item ->
+                        if(seen.add(item.url))videos.add(item)
                     }
-                    val title=card?.selectFirst(".poster-title")?.text().orEmpty()
-                        .ifBlank { posterEl?.attr("alt").orEmpty() }
-                        .ifBlank { anchor.attr("aria-label").removePrefix("تشغيل") }
-                        .ifBlank { anchor.text() }
-                        .trim().replace(Regex("\\s+")," ")
-                        .removePrefix("مسلسل قصير").trim()
-                    if(title.length<2) return@mapNotNull null
-                    Series(url,title,image)
-                }.take(12)
-                activity.runOnUiThread {
-                    if(activity.isDestroyed)return@runOnUiThread
-                    if(series.isEmpty()) {
-                        status.text="تصفح المسلسلات القصيرة على إيجي شو"
-                        return@runOnUiThread
+                } catch (_:Exception) {
+                    // Search availability can vary by country. Try the next query.
+                }
+                if(videos.size>=18)break
+            }
+            activity.runOnUiThread {
+                if(closed.get() || activity.isDestroyed)return@runOnUiThread
+                cards.removeAllViews()
+                if(videos.isEmpty()) {
+                    status.text="تعذّر تحميل المسلسلات من يوتيوب. اضغط هنا لإعادة المحاولة."
+                    status.setOnClickListener { load() }
+                    return@runOnUiThread
+                }
+                status.text="حلقات منشورة على YouTube • "+videos.size+" فيديو"
+                status.setOnClickListener(null)
+                videos.take(24).forEach { item ->
+                    val container=LinearLayout(activity).apply {
+                        orientation=LinearLayout.VERTICAL
+                        background=Palette.round(0xfff7f7f7.toInt(),dp(12).toFloat())
+                        clipToOutline=true
+                        setOnClickListener { onVideo(item) }
                     }
-                    cards.removeAllViews()
-                    series.forEach { item ->
-                        val card=LinearLayout(activity).apply {
-                            orientation=LinearLayout.VERTICAL
-                            setBackgroundColor(0xfff7f7f7.toInt())
-                            clipToOutline=true
-                            background=Palette.round(0xfff5f5f5.toInt(),dp(13).toFloat())
-                            setOnClickListener { onOpen(item.url) }
-                        }
-                        val poster=ImageView(activity).apply {
-                            scaleType=ImageView.ScaleType.CENTER_CROP
-                            setBackgroundColor(0xffe5e5e5.toInt())
-                            contentDescription=item.title
-                        }
-                        Thumbnails.show(poster,item.poster)
-                        card.addView(poster,LinearLayout.LayoutParams(-1,dp(171)))
-                        card.addView(TextView(activity).apply {
-                            text=item.title
-                            setTextColor(Palette.WHITE)
-                            textSize=12.5f
+                    val imageHolder=FrameLayout(activity).apply {
+                        setBackgroundColor(0xffeaeaea.toInt())
+                    }
+                    val img=ImageView(activity).apply {
+                        scaleType=ImageView.ScaleType.CENTER_CROP
+                        contentDescription=item.title
+                    }
+                    Thumbnails.show(img,item.thumbnail)
+                    imageHolder.addView(img, FrameLayout.LayoutParams(-1,-1))
+                    if(item.duration>=0) {
+                        val duration=TextView(activity).apply {
+                            text=Palette.formattedDuration(item.duration)
+                            textSize=11f
+                            setTextColor(Color.WHITE)
                             typeface=Typeface.DEFAULT_BOLD
-                            maxLines=2
-                            ellipsize=android.text.TextUtils.TruncateAt.END
-                            gravity=Gravity.RIGHT
-                            setPadding(dp(6),dp(7),dp(6),0)
-                        },LinearLayout.LayoutParams(-1,dp(50)))
-                        cards.addView(card,LinearLayout.LayoutParams(dp(126),dp(221)).apply {
-                            marginEnd=dp(9)
+                            background=Palette.round(0xdf000000.toInt(),dp(4).toFloat())
+                            setPadding(dp(5),dp(2),dp(5),dp(2))
+                        }
+                        imageHolder.addView(duration,FrameLayout.LayoutParams(-2,-2,
+                            Gravity.BOTTOM or Gravity.END).apply {
+                            rightMargin=dp(7)
+                            bottomMargin=dp(7)
                         })
                     }
-                    status.visibility=View.GONE
-                }
-            }catch(_:Exception){
-                activity.runOnUiThread {
-                    if(!activity.isDestroyed)status.text="عرض المسلسلات القصيرة على موقع إيجي شو"
+                    container.addView(imageHolder,LinearLayout.LayoutParams(-1,dp(117)))
+                    container.addView(TextView(activity).apply {
+                        text=item.title
+                        textSize=13f
+                        typeface=Typeface.DEFAULT_BOLD
+                        setTextColor(Palette.WHITE)
+                        maxLines=2
+                        ellipsize=android.text.TextUtils.TruncateAt.END
+                        gravity=Gravity.RIGHT
+                        setPadding(dp(8),dp(7),dp(8),dp(2))
+                    },LinearLayout.LayoutParams(-1,dp(55)))
+                    container.addView(TextView(activity).apply {
+                        text=item.channel + (if(item.views>=0)" • "+Palette.count(item.views)+" مشاهدة" else "")
+                        textSize=11f
+                        setTextColor(Palette.SECOND)
+                        maxLines=2
+                        ellipsize=android.text.TextUtils.TruncateAt.END
+                        gravity=Gravity.RIGHT
+                        setPadding(dp(8),0,dp(8),0)
+                    },LinearLayout.LayoutParams(-1,dp(42)))
+                    cards.addView(container,LinearLayout.LayoutParams(dp(210),dp(214)).apply {
+                        rightMargin=dp(9)
+                    })
                 }
             }
         }
     }
-    fun close(){executor.shutdownNow()}
+    fun close() {
+        closed.set(true)
+        executor.shutdownNow()
+    }
 }
