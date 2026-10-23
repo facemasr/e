@@ -334,7 +334,13 @@ class MainActivity:Activity() {
         }
         categories.addView(chips)
         root.addView(categories,LinearLayout.LayoutParams(-1,dp(49)))
-        shortSeriesSlider=ShortSeriesCarousel(this) { url -> openShortSeriesPage(url) }
+        shortSeriesSlider=ShortSeriesCarousel(this,
+            { video -> openPlayer(video) },
+            {
+                searchBox.setText("مسلسلات قصيرة الحلقة 1")
+                search()
+            }
+        )
         root.addView(shortSeriesSlider.root,LinearLayout.LayoutParams(-1,-2))
         shortSeriesSlider.load()
 
@@ -554,23 +560,6 @@ class MainActivity:Activity() {
         val id=url.getQueryParameter("egy")?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))} ?:return
         openPlayer(VideoModel("https://www.youtube.com/watch?v="+id,
             "فيديو يوتيوب","",-1L,-1L,"","","",false,false))
-    }
-    private fun openShortSeriesPage(url:String) {
-        val parsed=Uri.parse(url)
-        if(parsed.scheme!="https" || parsed.host!="egyshow.com" ||
-            !parsed.path.orEmpty().startsWith("/ar/short-series"))return
-        if(isWatching)leavePlayer()
-        shortSeriesSlider.root.visibility=View.GONE
-        customTerm="مسلسلات قصيرة"
-        webMode=true
-        sectionTitle.text="المسلسلات القصيرة"
-        status.text="تصفح المحتوى عبر موقع إيجي شو"
-        categories.visibility=View.GONE
-        searchRow.visibility=View.GONE
-        list.visibility=View.GONE
-        webResults.visibility=View.VISIBLE
-        moreButton.visibility=View.GONE
-        webResults.loadUrl(url)
     }
     private fun showSearch() {
         if(isWatching)leavePlayer()
