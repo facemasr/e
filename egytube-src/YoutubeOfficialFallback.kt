@@ -71,6 +71,7 @@ internal class YoutubeOfficialFallback(private val activity:Activity) {
     fun show(id:String) {
         if(!id.matches(Regex("[A-Za-z0-9_-]{11}")))return
         root.visibility=View.VISIBLE
+        root.keepScreenOn=true
         if(currentId==id){web.onResume();return}
         currentId=id
         // Use YouTube's own embedded UI; ads and content limitations remain enforced by YouTube.
@@ -99,6 +100,7 @@ internal class YoutubeOfficialFallback(private val activity:Activity) {
         web.stopLoading()
         web.loadUrl("about:blank")
         root.visibility=View.GONE
+        root.keepScreenOn=false
     }
     fun dispose() {
         stop()
