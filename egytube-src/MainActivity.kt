@@ -8,6 +8,10 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.app.PictureInPictureParams
+import android.util.Rational
+import android.graphics.Rect
+import android.widget.FrameLayout
 import android.view.WindowInsets
 import android.webkit.WebView
 import android.webkit.WebResourceRequest
@@ -64,6 +68,13 @@ class MainActivity:Activity() {
     private lateinit var playerDetails:LinearLayout
     private lateinit var playerHost:LinearLayout
     private lateinit var advertising:AdvertisementBanner
+    private lateinit var screen:FrameLayout
+    private lateinit var miniHost:LinearLayout
+    private lateinit var miniSlot:FrameLayout
+    private lateinit var pipHost:FrameLayout
+    private lateinit var miniTitle:TextView
+    private var miniActive=false
+    private var inPip=false
     private lateinit var footer:LinearLayout
     private lateinit var moreButton:TextView
     private var currentToken=0
@@ -119,6 +130,8 @@ class MainActivity:Activity() {
     }
 
     private fun buildUI() {
+        miniActive=false
+        inPip=false
         // Rebuilding the screen after country selection must release the old player and WebViews.
         if(this::advertising.isInitialized) advertising.dispose()
         if(this::panel.isInitialized) panel.release()
@@ -201,7 +214,13 @@ class MainActivity:Activity() {
             setPadding(dp(17),0,dp(17),dp(8))
         }
         root.addView(status)
-        panel=VideoPlaybackPanel(this,{ leavePlayer() },{ chooseQuality() },{ fullscreen -> resizePlayer(fullscreen) })
+        panel=VideoPlaybackPanel(this,
+            { leavePlayer() },
+            { chooseQuality() },
+            { fullscreen -> resizePlayer(fullscreen) },
+            { enterPip() },
+            { expandMini() }
+        )
         panel.playbackError={ error -> runOnUiThread { status.text=error;status.visibility=View.VISIBLE } }
         playerHost=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
@@ -209,10 +228,9 @@ class MainActivity:Activity() {
         }
         playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,dp(233)))
         root.addView(playerHost,LinearLayout.LayoutParams(-1,-2))
-        // The ad is in page content, NOT on top of or inside the YouTube video/player.
+        // The clearly labelled advertising placement belongs INSIDE the player frame.
         advertising=AdvertisementBanner(this)
-        root.addView(advertising,LinearLayout.LayoutParams(-1,dp(86)))
-        advertising.display()
+        panel.attachAd(advertising)
         playerDetails=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
             visibility=View.GONE
@@ -292,7 +310,50 @@ class MainActivity:Activity() {
         },LinearLayout.LayoutParams(dp(45),dp(45)))
         tab("◉  الرائج"){leavePlayer();loadTrending()}
         root.addView(footer,LinearLayout.LayoutParams(-1,dp(58)))
-        setContentView(root)
+        // A stable full-window stage keeps a floating in-app mini-player and PiP surface.
+        screen=FrameLayout(this).apply {setBackgroundColor(Palette.BG)}
+        screen.addView(root,FrameLayout.LayoutParams(-1,-1))
+        miniHost=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            visibility=View.GONE
+            background=Palette.round(0xff182234.toInt(),dp(14).toFloat())
+            elevation=dp(12).toFloat()
+            clipToOutline=true
+        }
+        miniSlot=FrameLayout(this).apply {setBackgroundColor(Color.BLACK)}
+        miniHost.addView(miniSlot,LinearLayout.LayoutParams(-1,dp(126)))
+        val miniBar=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            gravity=Gravity.CENTER_VERTICAL
+            setPadding(dp(5),0,dp(3),0)
+        }
+        miniTitle=baseText("EGYTUBE",11f,true).apply {
+            maxLines=1
+            ellipsize=android.text.TextUtils.TruncateAt.END
+            setOnClickListener { expandMini() }
+        }
+        miniBar.addView(miniTitle,LinearLayout.LayoutParams(0,-1,1f))
+        miniBar.addView(baseText("▣",17f,true).apply {
+            gravity=Gravity.CENTER
+            contentDescription="تكبير الفيديو"
+            setOnClickListener { expandMini() }
+        },LinearLayout.LayoutParams(dp(32),dp(37)))
+        miniBar.addView(baseText("×",23f,true).apply {
+            gravity=Gravity.CENTER
+            contentDescription="إغلاق المشغل المصغر"
+            setOnClickListener {closeMini()}
+        },LinearLayout.LayoutParams(dp(33),dp(37)))
+        miniHost.addView(miniBar,LinearLayout.LayoutParams(-1,dp(39)))
+        screen.addView(miniHost,FrameLayout.LayoutParams(dp(228),dp(165),
+            Gravity.BOTTOM or Gravity.END).apply {
+                bottomMargin=dp(79);rightMargin=dp(12)
+        })
+        pipHost=FrameLayout(this).apply {
+            visibility=View.GONE
+            setBackgroundColor(Color.BLACK)
+        }
+        screen.addView(pipHost,FrameLayout.LayoutParams(-1,-1))
+        setContentView(screen)
         // Edge-to-edge is enforced by Android 15+ for targetSdk 35.
         // Keep the header below status-bar icons and footer above gesture navigation.
         if(Build.VERSION.SDK_INT >= 35) {
@@ -457,6 +518,14 @@ class MainActivity:Activity() {
     }
 
     private fun openPlayer(model:VideoModel) {
+        // If a prior video is playing in the mini view, return the same video surface
+        // to the standard player before beginning the selected video.
+        if(miniActive) {
+            miniActive=false
+            miniHost.visibility=View.GONE
+            attachPlayerToHost()
+            panel.setMiniMode(false)
+        }
         playingModel=model
         isWatching=true
         searchRow.visibility=View.GONE
@@ -558,14 +627,27 @@ class MainActivity:Activity() {
         panel.setSource(media,at)
     }
 
+    private fun attachPlayerToHost() {
+        (panel.root.parent as? ViewGroup)?.removeView(panel.root)
+        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,dp(233)))
+    }
     private fun leavePlayer() {
         if(!isWatching)return
         if(panel.exitFullIfNeeded())return
-        ++currentToken
-        panel.player.stop()
-        advertising.restore()
-        isWatching=false
-        playingModel=null
+        if(playingModel!=null && panel.player.mediaItemCount>0) {
+            miniActive=true
+            isWatching=false
+            panel.setMiniMode(true)
+            (panel.root.parent as? ViewGroup)?.removeView(panel.root)
+            miniSlot.addView(panel.root,FrameLayout.LayoutParams(-1,-1))
+            miniTitle.text=playingModel?.title ?: "EGYTUBE"
+            miniHost.visibility=View.VISIBLE
+        } else {
+            ++currentToken
+            panel.player.stop()
+            isWatching=false
+            playingModel=null
+        }
         playerHost.visibility=View.GONE
         playerDetails.visibility=View.GONE
         searchRow.visibility=View.VISIBLE
@@ -576,8 +658,89 @@ class MainActivity:Activity() {
             else "نتائج البحث عن: "+customTerm
         moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
     }
+    private fun expandMini() {
+        if(!miniActive || inPip)return
+        miniActive=false
+        miniHost.visibility=View.GONE
+        attachPlayerToHost()
+        panel.setMiniMode(false)
+        isWatching=true
+        playerHost.visibility=View.VISIBLE
+        playerDetails.visibility=View.VISIBLE
+        searchRow.visibility=View.GONE
+        categories.visibility=View.GONE
+        webResults.visibility=View.GONE
+        list.visibility=View.VISIBLE
+        moreButton.visibility=View.GONE
+    }
+    private fun closeMini() {
+        if(!miniActive)return
+        miniActive=false
+        miniHost.visibility=View.GONE
+        (panel.root.parent as? ViewGroup)?.removeView(panel.root)
+        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,dp(233)))
+        panel.setMiniMode(false)
+        panel.player.stop()
+        playingModel=null
+    }
+    private fun enterPip() {
+        if(Build.VERSION.SDK_INT<26 || !this::panel.isInitialized)return
+        if(!(isWatching || miniActive) || panel.player.mediaItemCount<1)return
+        val location=IntArray(2)
+        panel.root.getLocationOnScreen(location)
+        val rect=Rect(location[0],location[1],
+            location[0]+panel.root.width,location[1]+panel.root.height)
+        val builder=PictureInPictureParams.Builder()
+            .setAspectRatio(Rational(16,9))
+        if(!rect.isEmpty)builder.setSourceRectHint(rect)
+        try {
+            if(Build.VERSION.SDK_INT>=31)builder.setAutoEnterEnabled(true)
+            setPictureInPictureParams(builder.build())
+            if(!isInPictureInPictureMode)enterPictureInPictureMode(builder.build())
+        } catch (_:Exception) {
+            Toast.makeText(this,"ميزة النافذة العائمة غير متاحة على هذا الجهاز",Toast.LENGTH_SHORT).show()
+        }
+    }
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if(Build.VERSION.SDK_INT>=26 && (isWatching || miniActive) &&
+            this::panel.isInitialized && panel.player.isPlaying)enterPip()
+    }
+    override fun onPictureInPictureRequested():Boolean {
+        if(Build.VERSION.SDK_INT>=26 && (isWatching || miniActive)) {
+            enterPip()
+            return true
+        }
+        return super.onPictureInPictureRequested()
+    }
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode:Boolean,newConfig:Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode,newConfig)
+        inPip=isInPictureInPictureMode
+        if(isInPictureInPictureMode) {
+            panel.setPipMode(true)
+            miniHost.visibility=View.GONE
+            (panel.root.parent as? ViewGroup)?.removeView(panel.root)
+            pipHost.addView(panel.root,FrameLayout.LayoutParams(-1,-1))
+            pipHost.visibility=View.VISIBLE
+            root.visibility=View.GONE
+        } else {
+            pipHost.visibility=View.GONE
+            root.visibility=View.VISIBLE
+            miniActive=false
+            miniHost.visibility=View.GONE
+            attachPlayerToHost()
+            panel.setPipMode(false)
+            panel.setMiniMode(false)
+            isWatching=true
+            playerHost.visibility=View.VISIBLE
+            playerDetails.visibility=View.VISIBLE
+            searchRow.visibility=View.GONE
+            categories.visibility=View.GONE
+            webResults.visibility=View.GONE
+            list.visibility=View.VISIBLE
+        }
+    }
     private fun resizePlayer(fullscreen:Boolean) {
-        if(fullscreen)advertising.hideForFullScreen() else advertising.restore()
         header.visibility=if(fullscreen)View.GONE else View.VISIBLE
         footer.visibility=if(fullscreen)View.GONE else View.VISIBLE
         sectionTitle.visibility=if(fullscreen)View.GONE else View.VISIBLE
@@ -600,7 +763,9 @@ class MainActivity:Activity() {
     override fun onConfigurationChanged(config:Configuration) {super.onConfigurationChanged(config)}
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if(isWatching)leavePlayer() else super.onBackPressed()
+        if(isWatching)leavePlayer()
+        else if(miniActive)closeMini()
+        else super.onBackPressed()
     }
     override fun onDestroy() {
         ++currentToken
