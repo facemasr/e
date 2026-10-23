@@ -15,7 +15,7 @@ import java.util.concurrent.Executors
 /** Independent native catalogue powered by EGYSHOW public APIs (NOT a website WebView). */
 internal class EgyshowNativeCatalog(
     private val activity:Activity,
-    private val onPlay:(type:String,id:Long,title:String,poster:String)->Unit
+    private val onPlay:(type:String,id:Long,title:String,poster:String,shareUrl:String)->Unit
 ) {
     companion object { const val HOST="https://egyshow.com" }
     private val executor=Executors.newSingleThreadExecutor()
@@ -280,6 +280,17 @@ internal class EgyshowNativeCatalog(
         })
         displayedCount++
     }
+    private fun shareUrl(item:JSONObject,kind:String):String {
+        val base=HOST+"/ar/"
+        if(kind=="matches"){
+            val slug=item.optString("slug").trim()
+            return if(slug.isBlank())base+"channels" else base+"channel/"+android.net.Uri.encode(slug)
+        }
+        val slug=item.optString("slug").trim()
+        val segment=when(kind){"movie"->"movie";"short_series"->"short-series";else->"series"}
+        return if(slug.isBlank())base+(if(kind=="movie")"movies" else if(kind=="series")"series" else "short-series")
+            else base+segment+"/"+android.net.Uri.encode(slug)
+    }
     private fun detail(item:JSONObject,group:String) {
         val id=item.optLong("id",0)
         if(id<=0)return
@@ -291,7 +302,7 @@ internal class EgyshowNativeCatalog(
             android.app.AlertDialog.Builder(activity).setTitle(title)
                 .setMessage(if(type=="movie")"تشغيل الفيلم عبر مصدر EGYSHOW المعتمد"
                     else "تشغيل القناة الرياضية عبر EGYSHOW عند توفر صلاحية المشاهدة")
-                .setPositiveButton("مشاهدة"){_,_->onPlay(type,id,title,poster)}
+                .setPositiveButton("مشاهدة"){_,_->onPlay(type,id,title,poster,shareUrl(item,group))}
                 .setNegativeButton("رجوع",null).show()
             return
         }
@@ -319,7 +330,7 @@ internal class EgyshowNativeCatalog(
                         .setItems(labels.toTypedArray()){_,which->
                             val ep=items[which]
                             onPlay("episode",ep.optLong("id"),title+" • "+labels[which],
-                                ep.optString("still_path").ifBlank{poster})
+                                ep.optString("still_path").ifBlank{poster},shareUrl(item,group))
                         }.setNegativeButton("إغلاق",null).show()
                 }
             }catch(e:Exception){
