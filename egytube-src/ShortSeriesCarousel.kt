@@ -93,7 +93,7 @@ internal class ShortSeriesCarousel(
                             .firstNotNullOfOrNull { key ->
                                 val raw=posterEl.attr(key)
                                 if(raw.isBlank() || raw.startsWith("data:"))null else {
-                                    val resolved=org.jsoup.helper.StringUtil.resolve(site,raw)
+                                    val resolved=posterEl.absUrl(key)
                                     if(resolved.startsWith("https://"))resolved else null
                                 }
                             }.orEmpty()
