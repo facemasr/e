@@ -630,6 +630,11 @@ class MainActivity:Activity() {
     }
     private fun showEgyshowCatalog(kind:String) {
         if(isWatching)leavePlayer()
+        ++recommendationToken
+        sameTypeVideos.visibility=View.GONE
+        recommendedHeader.visibility=View.GONE
+        siteRelated.hide()
+        siteHomeSlider.root.visibility=View.GONE
         if(this::siteSearch.isInitialized)siteSearch.hide()
         siteCatalogActive=true
         currentSiteCategory=kind
@@ -843,6 +848,11 @@ class MainActivity:Activity() {
         list.visibility=View.VISIBLE
     }
     private fun loadTrending() {
+        ++recommendationToken
+        sameTypeVideos.visibility=View.GONE
+        recommendedHeader.visibility=View.GONE
+        siteRelated.hide()
+        siteHomeSlider.root.visibility=View.VISIBLE
         if(this::siteSearch.isInitialized)siteSearch.hide()
         siteCatalogActive=false
         if(this::siteCatalog.isInitialized)siteCatalog.hide()
@@ -893,6 +903,11 @@ class MainActivity:Activity() {
         }
     }
     private fun search() {
+        ++recommendationToken
+        sameTypeVideos.visibility=View.GONE
+        recommendedHeader.visibility=View.GONE
+        siteRelated.hide()
+        siteHomeSlider.root.visibility=View.GONE
         shortSeriesSlider.root.visibility=View.GONE
         val term=searchBox.text.toString().trim()
         searchBox.dismissDropDown()
@@ -987,6 +1002,43 @@ class MainActivity:Activity() {
         }
     }
 
+    private fun populateYoutubeRecommendations(model:VideoModel) {
+        val token=++recommendationToken
+        val genre=categoryOf(model)
+        val local=cachedVideos.filter { candidate ->
+            !candidate.isLive && candidate.url!=model.url &&
+            (categoryOf(candidate)==genre || (model.channel.isNotBlank() && candidate.channel==model.channel))
+        }.distinctBy { it.url }.take(18)
+        sameTypeAdapter.replaceAll(local)
+        recommendedHeader.text=if(genre=="متنوع")"المزيد من فيديوهات YouTube"
+            else "المزيد من فيديوهات "+genre
+        recommendedHeader.visibility=View.VISIBLE
+        sameTypeVideos.visibility=View.VISIBLE
+        recommendationWorker.execute {
+            try {
+                val trimmed=model.title.replace(Regex("[#@!؟:,؛()\\[\\]\\\\/_]+")," ")
+                    .replace(Regex("\\s+")," ").trim().take(65)
+                val phrase=(if(trimmed.length>=5)trimmed
+                    else (model.channel+" "+genre)).take(80)
+                val extractor=ServiceList.YouTube.getSearchExtractor(phrase)
+                extractor.fetchPage()
+                val fresh=extractor.initialPage.items
+                    .filterIsInstance<StreamInfoItem>()
+                    .map(::modelFrom)
+                    .filter { !it.isLive && it.url!=model.url &&
+                        (categoryOf(it)==genre ||
+                         (model.channel.isNotBlank() && it.channel==model.channel)) }
+                val combined=(local+fresh).distinctBy { it.url }.take(28)
+                runOnUiThread {
+                    if(isDestroyed || token!=recommendationToken || !isWatching || playingSiteMedia)return@runOnUiThread
+                    sameTypeAdapter.replaceAll(combined)
+                }
+            } catch(_:Exception) {
+                // Keep related videos from the current local feed if YouTube extraction fails.
+            }
+        }
+    }
+
     private fun openPlayer(model:VideoModel, explicitSiteSource:StreamChoice?=null,
                            managedAdHtml:String?=null,siteTarget:Pair<String,Long>?=null) {
         if(siteTarget==null && model.isLive) {
@@ -1023,6 +1075,11 @@ class MainActivity:Activity() {
             sitePlayer.root.visibility=View.GONE
             panel.root.visibility=View.VISIBLE
         }
+        recommendationToken++
+        siteHomeSlider.root.visibility=View.GONE
+        siteRelated.hide()
+        sameTypeVideos.visibility=View.GONE
+        recommendedHeader.visibility=View.GONE
         playingModel=model
         siteSearch.root.visibility=View.GONE
         shortSeriesSlider.root.visibility=View.GONE
@@ -1040,9 +1097,10 @@ class MainActivity:Activity() {
         panel.setTitle(model.title)
         panel.setSubtitle(model.channel)
         webResults.visibility=View.GONE
-        list.visibility=if(playingSiteMedia)View.GONE else View.VISIBLE
+        list.visibility=View.GONE
         panel.player.stop()
         playerHost.visibility=View.VISIBLE
+        if(!playingSiteMedia && !pipAuthorizedSource)populateYoutubeRecommendations(model)
         playerDetails.visibility=View.VISIBLE
         playerDetails.removeAllViews()
         // Error notices are displayed only if playback actually fails.
@@ -1083,7 +1141,6 @@ class MainActivity:Activity() {
         val token=++currentToken
         if(siteTarget!=null) {
             // EGYSHOW owns its player UI, ad slots and server selection.
-            list.visibility=View.GONE
             sitePlayer.show(siteTarget.first,siteTarget.second)
             return
         }
@@ -1309,6 +1366,11 @@ class MainActivity:Activity() {
         }
         playerHost.visibility=View.GONE
         playerDetails.visibility=View.GONE
+        ++recommendationToken
+        sameTypeVideos.visibility=View.GONE
+        recommendedHeader.visibility=View.GONE
+        siteRelated.hide()
+        siteHomeSlider.root.visibility=if(customTerm.isNullOrBlank())View.VISIBLE else View.GONE
         searchRow.visibility=View.GONE
         categories.visibility=View.VISIBLE
         sectionTitle.visibility=View.VISIBLE
@@ -1322,6 +1384,7 @@ class MainActivity:Activity() {
             else "نتائج البحث عن: "+customTerm
         moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
         if(siteCatalogActive) {
+            siteHomeSlider.root.visibility=View.GONE
             siteSearch.hide()
             siteCatalog.root.visibility=View.VISIBLE
             categories.visibility=View.GONE
@@ -1349,6 +1412,12 @@ class MainActivity:Activity() {
         isWatching=true
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
+        siteHomeSlider.root.visibility=View.GONE
+        if(playingSiteMedia)siteRelated.root.visibility=View.VISIBLE
+        else {
+            recommendedHeader.visibility=View.VISIBLE
+            sameTypeVideos.visibility=View.VISIBLE
+        }
         searchRow.visibility=View.GONE
         categories.visibility=View.GONE
         sectionTitle.visibility=View.GONE
@@ -1458,7 +1527,10 @@ class MainActivity:Activity() {
         siteSearch.root.visibility=View.GONE
         moreButton.visibility=View.GONE
         playerDetails.visibility=if(fullscreen)View.GONE else if(isWatching)View.VISIBLE else View.GONE
-        list.visibility=if(fullscreen || webMode || playingSiteMedia)View.GONE else View.VISIBLE
+        list.visibility=View.GONE
+        sameTypeVideos.visibility=if(fullscreen || !isWatching || playingSiteMedia)View.GONE else View.VISIBLE
+        recommendedHeader.visibility=if(fullscreen || !isWatching || playingSiteMedia)View.GONE else View.VISIBLE
+        if(playingSiteMedia)siteRelated.root.visibility=if(fullscreen)View.GONE else View.VISIBLE
         webResults.visibility=View.GONE
         if(fullscreen) {
             @Suppress("DEPRECATION")
