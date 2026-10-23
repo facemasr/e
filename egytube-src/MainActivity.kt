@@ -62,6 +62,14 @@ import java.util.concurrent.Executors
 @OptIn(UnstableApi::class)
 class MainActivity:Activity() {
     private val worker=Executors.newSingleThreadExecutor()
+    private val recommendationWorker=Executors.newSingleThreadExecutor()
+    private var recommendationToken=0
+    private lateinit var sameTypeVideos:RecyclerView
+    private lateinit var sameTypeAdapter:VideoCardAdapter
+    private lateinit var siteHomeSlider:EgyshowMediaShelves
+    private lateinit var siteRelated:EgyshowMediaShelves
+    private var currentSiteGenre="movie"
+
     private lateinit var root:LinearLayout
     private lateinit var header:LinearLayout
     private lateinit var searchRow:LinearLayout
@@ -224,6 +232,8 @@ class MainActivity:Activity() {
 
     private fun buildUI() {
         if(this::siteCatalog.isInitialized)siteCatalog.dispose()
+        if(this::siteHomeSlider.isInitialized)siteHomeSlider.dispose()
+        if(this::siteRelated.isInitialized)siteRelated.dispose()
         if(this::siteSearch.isInitialized)siteSearch.dispose()
         if(this::sitePlayer.isInitialized)sitePlayer.dispose()
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
@@ -322,7 +332,7 @@ class MainActivity:Activity() {
             "الكل" to "", "مقترح لك" to "@for-you", "الأكثر مشاهدة" to "@popular",
             "الأحدث" to "@new", "موسيقى" to "موسيقى", "دراما" to "مسلسلات دراما",
             "أفلام" to "أفلام", "رياضة" to "رياضة", "ألعاب" to "الألعاب",
-            "مباشر" to "بث مباشر", "أخبار" to "أخبار"
+            "أخبار" to "أخبار"
         )) {
             val term=entry.second
             val selected=(term=="@for-you" && homeMode=="مقترح") || (term=="@popular" && homeMode=="الأكثر مشاهدة")
@@ -361,6 +371,9 @@ class MainActivity:Activity() {
         )
         root.addView(shortSeriesSlider.root,LinearLayout.LayoutParams(-1,-2))
         shortSeriesSlider.load()
+        siteHomeSlider=EgyshowMediaShelves(this) { item->siteCatalog.openSearchHit(item) }
+        root.addView(siteHomeSlider.root,LinearLayout.LayoutParams(-1,-2))
+        siteHomeSlider.showHome()
 
         sectionTitle=baseText(homeTitle(),19f,true).apply {
             setPadding(dp(17),dp(12),dp(10),dp(4))
@@ -461,6 +474,16 @@ class MainActivity:Activity() {
             }
         })
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
+        sameTypeVideos=RecyclerView(this).apply {
+            layoutManager=LinearLayoutManager(this@MainActivity)
+            clipToPadding=false
+            visibility=View.GONE
+        }
+        sameTypeAdapter=VideoCardAdapter(this) { video->openPlayer(video) }
+        sameTypeVideos.adapter=sameTypeAdapter
+        root.addView(sameTypeVideos,LinearLayout.LayoutParams(-1,0,1f))
+        siteRelated=EgyshowMediaShelves(this){ item->siteCatalog.openSearchHit(item) }
+        root.addView(siteRelated.root,LinearLayout.LayoutParams(-1,0,1f))
         webResults = WebView(this).apply {
             visibility=View.GONE
             setBackgroundColor(Palette.BG)
@@ -492,8 +515,8 @@ class MainActivity:Activity() {
             }
         }
         root.addView(webResults,LinearLayout.LayoutParams(-1,0,1f))
-        siteCatalog=EgyshowNativeCatalog(this) { kind,id,title,poster,shareUrl ->
-            playEgyshowContent(kind,id,title,poster,shareUrl)
+        siteCatalog=EgyshowNativeCatalog(this) { kind,id,title,poster,shareUrl,genre ->
+            playEgyshowContent(kind,id,title,poster,shareUrl,genre)
         }
         root.addView(siteCatalog.root,LinearLayout.LayoutParams(-1,0,1f))
         moreButton=baseText("عرض المزيد",14f,true,Palette.SECOND).apply {
@@ -637,14 +660,16 @@ class MainActivity:Activity() {
             return result
         }finally{conn.disconnect()}
     }
-    private fun playEgyshowContent(kind:String,id:Long,title:String,poster:String,shareUrl:String){
+    private fun playEgyshowContent(kind:String,id:Long,title:String,poster:String,shareUrl:String,genre:String){
         // Same exact production player URL and browser ad controller as the EGYSHOW website.
         // No confirmation dialog, no client-side relay lease manipulation.
         if(kind !in setOf("movie","episode","channel") || id<=0L)return
         val watchUrl="https://egyshow.com/watch?target_type=$kind&target_id=$id&embed=1"
         val model=VideoModel(watchUrl,title,"EGYSHOW",-1L,-1L,"",poster,"",false,kind=="channel")
+        currentSiteGenre=genre
         openPlayer(model,siteTarget=kind to id)
         siteShareUrl=shareUrl
+        siteRelated.showRelated(genre,if(kind=="movie")id else 0L)
     }
     private fun showSearch() {
         if(isWatching)leavePlayer()
