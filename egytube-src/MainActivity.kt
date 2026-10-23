@@ -368,7 +368,6 @@ class MainActivity:Activity() {
                 portraitVideo=portrait
                 adjustNormalPlayerHeight()
             },
-            { downloadActiveVideo() },
             { shareActiveVideo() }
         )
         panel.playbackError={ error -> runOnUiThread {
