@@ -990,12 +990,15 @@ class MainActivity:Activity() {
             attachSiteToHost()
             panel.setMiniMode(false)
         }
+        // Never leave a previous site's WebView playing behind a native YouTube video,
+        // and never replace the original native YouTube player with a website frame.
         if(websiteWatchActive) {
             panel.player.stop()
             panel.root.visibility=View.GONE
             sitePlayer.root.visibility=View.VISIBLE
         } else {
             sitePlayer.stop()
+            sitePlayer.root.visibility=View.GONE
             panel.root.visibility=View.VISIBLE
         }
         playingModel=model
@@ -1122,11 +1125,22 @@ class MainActivity:Activity() {
                     if(isDestroyed || token!=currentToken || !isWatching)return@runOnUiThread
                     panel.setTitle(info.name)
                     sourceOptions.clear();sourceOptions.addAll(opts)
-                    if(opts.isEmpty())status.text="لم يُعثر على مصدر تشغيل متاح لهذا الفيديو."
-                    else selectQuality(0)
+                    if(opts.isEmpty()) {
+                        watchNotice.text="لم يُعثر على مصدر تشغيل متاح لهذا الفيديو."
+                        watchNotice.visibility=View.VISIBLE
+                    } else {
+                        watchNotice.text=""
+                        watchNotice.visibility=View.GONE
+                        selectQuality(0)
+                    }
                 }
             } catch(e:Exception) {
-                runOnUiThread { if(token==currentToken)status.text="تعذّر فتح الفيديو: "+(e.message?:"غير معروف") }
+                runOnUiThread {
+                    if(token==currentToken && !isDestroyed) {
+                        watchNotice.text="تعذّر تشغيل فيديو يوتيوب: "+(e.message?:"غير معروف")
+                        watchNotice.visibility=View.VISIBLE
+                    }
+                }
             }
         }
     }
@@ -1251,6 +1265,10 @@ class MainActivity:Activity() {
                 else progressive(option.url)
         }
         status.text="الجودة: "+option.title
+        if(this::watchNotice.isInitialized && !websiteWatchActive) {
+            watchNotice.text=""
+            watchNotice.visibility=View.GONE
+        }
         panel.setSource(media,at)
     }
 
