@@ -20,6 +20,8 @@ import android.webkit.WebChromeClient
 import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -43,6 +45,8 @@ import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.ListExtractor
 import org.schabi.newpipe.extractor.InfoItem
+import org.schabi.newpipe.extractor.channel.ChannelInfoItem
+import org.schabi.newpipe.extractor.playlist.PlaylistInfoItem
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.stream.StreamInfo
@@ -56,7 +60,13 @@ class MainActivity:Activity() {
     private lateinit var root:LinearLayout
     private lateinit var header:LinearLayout
     private lateinit var searchRow:LinearLayout
-    private lateinit var searchBox:EditText
+    private lateinit var searchBox:AutoCompleteTextView
+    private val cachedVideos=mutableListOf<VideoModel>()
+    private val extraItems=mutableListOf<InfoItem>()
+    private lateinit var extraResults:HorizontalScrollView
+    private lateinit var extraRow:LinearLayout
+    private var typeFilter="الكل"
+    private var sortMode="الملاءمة"
     private lateinit var categories:HorizontalScrollView
     private lateinit var sectionTitle:TextView
     private lateinit var status:TextView
@@ -120,8 +130,10 @@ class MainActivity:Activity() {
         }
         countryLabel=options[country] ?: country
         NewPipe.setPreferredContentCountry(ContentCountry(country))
-        window.statusBarColor=Palette.BG
-        window.navigationBarColor=Palette.BG
+        window.statusBarColor=Color.WHITE
+        window.navigationBarColor=Color.WHITE
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         buildUI()
         if(intent?.action==Intent.ACTION_SEND && intent.type=="text/plain") {
             searchBox.setText(intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty())
@@ -143,7 +155,9 @@ class MainActivity:Activity() {
         header=LinearLayout(this).apply {
             gravity=Gravity.CENTER_VERTICAL
             orientation=LinearLayout.HORIZONTAL
-            setPadding(dp(12),dp(5),dp(12),dp(2))
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
+            setPadding(dp(13),dp(3),dp(13),dp(3))
+            setBackgroundColor(Color.WHITE)
         }
         header.addView(ImageView(this).apply {
             setImageResource(R.drawable.egytube_logo)
@@ -153,9 +167,11 @@ class MainActivity:Activity() {
         header.addView(baseText("EGYTUBE",21f,true).apply {
             setPadding(dp(8),0,0,0)
         },LinearLayout.LayoutParams(0,-2,1f))
-        header.addView(clickable("⌕", { searchBox.requestFocus();(getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(searchBox,InputMethodManager.SHOW_IMPLICIT) }))
-        header.addView(clickable("⟳",{ loadTrending() }).apply {
-            setBackgroundColor(Color.TRANSPARENT)
+        header.addView(clickable("⌕",{showSearch()}).apply {
+            textSize=23f;setBackgroundColor(Color.TRANSPARENT)
+        })
+        header.addView(clickable("☰",{showMenu()}).apply {
+            textSize=19f;setBackgroundColor(Color.TRANSPARENT)
         })
         root.addView(header, LinearLayout.LayoutParams(-1,dp(58)))
 
@@ -164,7 +180,10 @@ class MainActivity:Activity() {
             orientation=LinearLayout.HORIZONTAL
             setPadding(dp(12),dp(3),dp(12),dp(5))
         }
-        searchBox=EditText(this).apply {
+        searchBox=AutoCompleteTextView(this).apply {
+            threshold=1
+            dropDownVerticalOffset=dp(4)
+
             hint="ابحث عن الفيديوهات أو ألصق رابطًا"
             textSize=14.5f
             setTextColor(Palette.WHITE)
@@ -174,9 +193,33 @@ class MainActivity:Activity() {
             isSingleLine=true
             imeOptions=EditorInfo.IME_ACTION_SEARCH
             setOnEditorActionListener { _,_,_ -> search();true }
+            setOnItemClickListener { parent,_,position,_ ->
+                setText(parent.getItemAtPosition(position).toString())
+                dismissDropDown()
+                search()
+            }
+            addTextChangedListener(object:TextWatcher {
+                override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int){}
+                override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
+                    val term=s?.toString()?.trim().orEmpty()
+                    if(term.length<2)return
+                    val history=getSharedPreferences("egytube_search",0)
+                        .getString("terms","").orEmpty().split("\n")
+                    val suggestions=(history + cachedVideos.map{it.title}
+                        + listOf("أفلام","موسيقى","ألعاب","تقنية","رياضة","Shorts"))
+                        .filter { it.contains(term,ignoreCase=true) && it!=term }
+                        .distinct().take(7)
+                    if(suggestions.isNotEmpty()) {
+                        setAdapter(ArrayAdapter(this@MainActivity,android.R.layout.simple_dropdown_item_1line,suggestions))
+                        showDropDown()
+                    }
+                }
+                override fun afterTextChanged(s:Editable?){}
+            })
         }
         searchRow.addView(searchBox,LinearLayout.LayoutParams(0,dp(48),1f))
         searchRow.addView(clickable("بحث",{search()}),LinearLayout.LayoutParams(dp(69),dp(45)).apply { leftMargin=dp(8) })
+        searchRow.visibility=View.GONE
         root.addView(searchRow,LinearLayout.LayoutParams(-1,dp(65)))
 
         categories=HorizontalScrollView(this).apply {
@@ -190,9 +233,9 @@ class MainActivity:Activity() {
         val countryChip=clickable("◉  "+countryLabel,{ chooseCountry() })
         chips.addView(countryChip, LinearLayout.LayoutParams(-2,dp(40)).apply { rightMargin=dp(7) })
         for (entry in listOf(
-            "الرائج" to "", "موسيقى" to "موسيقى", "ألعاب" to "الألعاب",
-            "تقنية" to "تكنولوجيا", "رياضة" to "الرياضة",
-            "أفلام" to "أفلام"
+            "الكل" to "", "موسيقى" to "موسيقى", "ألعاب" to "الألعاب",
+            "مباشر" to "بث مباشر", "أخبار" to "الأخبار",
+            "رياضة" to "الرياضة", "أفلام" to "أفلام"
         )) {
             val term=entry.second
             chips.addView(clickable(entry.first,{
@@ -214,6 +257,26 @@ class MainActivity:Activity() {
             setPadding(dp(17),0,dp(17),dp(8))
         }
         root.addView(status)
+        val searchTools=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
+            gravity=Gravity.CENTER_VERTICAL
+            setPadding(dp(12),dp(3),dp(12),dp(7))
+        }
+        searchTools.addView(clickable("نوع النتائج ▾",{chooseType()}))
+        searchTools.addView(clickable("الترتيب ▾",{chooseSort()}),
+            LinearLayout.LayoutParams(-2,dp(39)).apply {leftMargin=dp(7)})
+        root.addView(searchTools,LinearLayout.LayoutParams(-1,dp(49)))
+        extraResults=HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled=false
+            visibility=View.GONE
+        }
+        extraRow=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            setPadding(dp(10),dp(4),dp(10),dp(9))
+        }
+        extraResults.addView(extraRow)
+        root.addView(extraResults,LinearLayout.LayoutParams(-1,dp(65)))
         panel=VideoPlaybackPanel(this,
             { leavePlayer() },
             { chooseQuality() },
@@ -292,31 +355,35 @@ class MainActivity:Activity() {
 
         footer=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
             gravity=Gravity.CENTER_VERTICAL
-            background=Palette.round(0xff111724.toInt(),0f)
+            setBackgroundColor(Color.WHITE)
+            elevation=dp(6).toFloat()
         }
-        fun tab(t:String,go:()->Unit) {
-            footer.addView(baseText(t,13.5f,true).apply {
+        fun tab(icon:String,name:String,go:()->Unit) {
+            val cell=LinearLayout(this).apply {
+                orientation=LinearLayout.VERTICAL
                 gravity=Gravity.CENTER
-                setOnClickListener { go() }
-            },LinearLayout.LayoutParams(0,dp(55),1f))
+                setOnClickListener {go()}
+            }
+            cell.addView(baseText(icon,24f,true).apply {gravity=Gravity.CENTER},
+                LinearLayout.LayoutParams(-1,dp(28)))
+            cell.addView(baseText(name,11f).apply {gravity=Gravity.CENTER},
+                LinearLayout.LayoutParams(-1,dp(22)))
+            footer.addView(cell,LinearLayout.LayoutParams(0,dp(61),1f))
         }
-        tab("⌂  الرئيسية"){leavePlayer();loadTrending()}
-        tab("⌕  البحث"){leavePlayer();searchBox.requestFocus();(getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(searchBox,InputMethodManager.SHOW_IMPLICIT)}
-        footer.addView(ImageView(this).apply {
-            setImageResource(R.drawable.egytube_logo)
-            scaleType=ImageView.ScaleType.FIT_CENTER
-            setOnClickListener {leavePlayer();loadTrending()}
-        },LinearLayout.LayoutParams(dp(45),dp(45)))
-        tab("◉  الرائج"){leavePlayer();loadTrending()}
-        root.addView(footer,LinearLayout.LayoutParams(-1,dp(58)))
+        tab("⌂","الرئيسية"){if(isWatching)leavePlayer();loadTrending()}
+        tab("▤","Shorts"){if(isWatching)leavePlayer();showShorts()}
+        tab("≡","الاشتراكات"){if(isWatching)leavePlayer();showSubscriptions()}
+        tab("◉","أنت"){if(isWatching)leavePlayer();showLibrary()}
+        root.addView(footer,LinearLayout.LayoutParams(-1,dp(64)))
         // A stable full-window stage keeps a floating in-app mini-player and PiP surface.
         screen=FrameLayout(this).apply {setBackgroundColor(Palette.BG)}
         screen.addView(root,FrameLayout.LayoutParams(-1,-1))
         miniHost=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
             visibility=View.GONE
-            background=Palette.round(0xff182234.toInt(),dp(14).toFloat())
+            background=Palette.round(Color.WHITE,dp(14).toFloat())
             elevation=dp(12).toFloat()
             clipToOutline=true
         }
