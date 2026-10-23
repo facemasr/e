@@ -17,10 +17,12 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.C
 import androidx.media3.common.VideoSize
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
@@ -39,7 +41,6 @@ internal class VideoPlaybackPanel(
     private val requestPip:()->Unit,
     private val expandMini:()->Unit,
     private val onVideoOrientationChanged:(Boolean)->Unit,
-    private val requestDownload:()->Unit,
     private val requestShare:()->Unit
 ) {
     val player=ExoPlayer.Builder(activity).build()
@@ -66,7 +67,13 @@ internal class VideoPlaybackPanel(
     private val subtitle=TextView(activity)
     private var muted=false
     private lateinit var volume:TextView
-    private lateinit var download:TextView
+    private lateinit var captions:TextView
+    private var subtitlesOn=false
+    private val buffering=ProgressBar(activity).apply {
+        isIndeterminate=true
+        indeterminateTintList=android.content.res.ColorStateList.valueOf(Color.WHITE)
+        visibility=View.GONE
+    }
     private lateinit var share:TextView
     private var centerIsPlaying=false
     private val handler=Handler(Looper.getMainLooper())
@@ -116,7 +123,9 @@ internal class VideoPlaybackPanel(
             val p=player.currentPosition
             elapsed.text=if(p>=0) Palette.formattedDuration(p/1000) else "0:00"
             duration.text=if(d>0) Palette.formattedDuration(d/1000) else "0:00"
-            if(!scrubbing) seek.progress=if(d>0) ((p*1000)/d).coerceIn(0,1000).toInt() else 0
+            if(!scrubbing)seek.progress=if(d>0) ((p*1000)/d).coerceIn(0,1000).toInt() else 0
+            seek.secondaryProgress=if(d>0)
+                ((player.bufferedPosition*1000L)/d).coerceIn(0,1000).toInt() else 0
             play.text=if(player.isPlaying) "Ⅱ" else "▶"
             play.background=Palette.round(0x99000000.toInt(),dp(42).toFloat())
             handler.postDelayed(this,800)
@@ -288,15 +297,15 @@ internal class VideoPlaybackPanel(
         }
         toolRow.addView(full,LinearLayout.LayoutParams(dp(40),dp(39)))
         quality=button("⚙",23f).apply {
-            contentDescription="جودة الفيديو"
-            setOnClickListener { chooseQuality();reveal() }
+            contentDescription="الإعدادات: الجودة والسرعة والترجمة"
+            setOnClickListener { showPlayerSettings() }
         }
         toolRow.addView(quality,LinearLayout.LayoutParams(dp(40),dp(39)))
-        download=button("↓",24f).apply {
-            contentDescription="حفظ الفيديو على الجهاز"
-            setOnClickListener { requestDownload();reveal() }
+        captions=button("CC",15f).apply {
+            contentDescription="الترجمة"
+            setOnClickListener { toggleCaptions() }
         }
-        toolRow.addView(download,LinearLayout.LayoutParams(dp(40),dp(39)))
+        toolRow.addView(captions,LinearLayout.LayoutParams(dp(45),dp(39)))
         share=button("↗",23f).apply {
             contentDescription="مشاركة الفيديو"
             setOnClickListener { requestShare();reveal() }
@@ -327,11 +336,14 @@ internal class VideoPlaybackPanel(
         panel.addView(bottom,LinearLayout.LayoutParams(-1,dp(68)))
         overlay.addView(panel,FrameLayout.LayoutParams(-1,-1))
         root.addView(overlay,FrameLayout.LayoutParams(-1,-1))
+        root.addView(buffering,FrameLayout.LayoutParams(dp(46),dp(46),Gravity.CENTER))
         player.addListener(object:Player.Listener {
             override fun onVideoSizeChanged(videoSize:VideoSize) {
                 updateVideoDimensions(videoSize)
             }
             override fun onPlaybackStateChanged(state:Int) {
+                buffering.visibility=if(state==Player.STATE_BUFFERING &&
+                    !miniMode && !pipMode)View.VISIBLE else View.GONE
                 if(state==Player.STATE_READY)hideLater()
             }
             override fun onIsPlayingChanged(isPlaying:Boolean) {
@@ -396,6 +408,8 @@ internal class VideoPlaybackPanel(
     }
 
     fun setSource(media:MediaSource, resumePosition:Long) {
+        subtitlesOn=false
+        captions.text="CC"
         hasVideoDimensions=false
         landscapeVideo=false
         if(expanded)activity.requestedOrientation=displayOrientation()
@@ -407,6 +421,36 @@ internal class VideoPlaybackPanel(
         player.prepare()
         if(resumePosition>0L)player.seekTo(resumePosition)
         player.playWhenReady=true
+        reveal()
+    }
+    private fun showPlayerSettings() {
+        val values=arrayOf("الجودة","سرعة التشغيل","الترجمة","صورة داخل صورة")
+        android.app.AlertDialog.Builder(activity)
+            .setTitle("إعدادات المشغّل")
+            .setItems(values){dialog,which->
+                when(which){
+                    0->chooseQuality()
+                    1->showSpeeds()
+                    2->toggleCaptions()
+                    3->requestPip()
+                }
+                dialog.dismiss()
+                reveal()
+            }.show()
+    }
+    private fun toggleCaptions() {
+        val hasCaptions=player.currentTracks.groups.any {
+            it.type==C.TRACK_TYPE_TEXT && (0 until it.length).any { index->it.isTrackSupported(index) }
+        }
+        if(!hasCaptions) {
+            android.widget.Toast.makeText(activity,"لا تتوفر ترجمة لهذا الفيديو",
+                android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        subtitlesOn=!subtitlesOn
+        player.trackSelectionParameters=player.trackSelectionParameters.buildUpon()
+            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT,!subtitlesOn).build()
+        captions.text=if(subtitlesOn)"CC✓" else "CC"
         reveal()
     }
     private fun showSpeeds() {
