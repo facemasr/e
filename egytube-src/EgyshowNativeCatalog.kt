@@ -291,6 +291,11 @@ internal class EgyshowNativeCatalog(
         return if(slug.isBlank())base+(if(kind=="movie")"movies" else if(kind=="series")"series" else "short-series")
             else base+segment+"/"+android.net.Uri.encode(slug)
     }
+    fun openSearchHit(item:JSONObject) {
+        val kind=item.optString("media_type")
+        if(kind !in setOf("movie","series","short_series"))return
+        detail(item,kind)
+    }
     private fun detail(item:JSONObject,group:String) {
         val id=item.optLong("id",0)
         if(id<=0)return
@@ -299,11 +304,7 @@ internal class EgyshowNativeCatalog(
         val poster=if(group=="matches")item.optString("logo_url") else item.optString("poster_path")
         if(group=="movie" || group=="matches") {
             val type=if(group=="matches")"channel" else "movie"
-            android.app.AlertDialog.Builder(activity).setTitle(title)
-                .setMessage(if(type=="movie")"تشغيل الفيلم عبر مصدر EGYSHOW المعتمد"
-                    else "تشغيل القناة الرياضية عبر EGYSHOW عند توفر صلاحية المشاهدة")
-                .setPositiveButton("مشاهدة"){_,_->onPlay(type,id,title,poster,shareUrl(item,group))}
-                .setNegativeButton("رجوع",null).show()
+            onPlay(type,id,title,poster,shareUrl(item,group))
             return
         }
         info.text="جارٍ جلب حلقات "+title+"..."
