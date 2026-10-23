@@ -29,11 +29,11 @@ internal data class VideoModel(
 )
 
 internal object Palette {
-    const val BG = 0xff090d16.toInt()
-    const val SURFACE = 0xff141b2a.toInt()
-    const val SECOND = 0xffaab5c6.toInt()
-    const val RED = 0xffff364c.toInt()
-    const val WHITE = 0xfff7f9ff.toInt()
+    const val BG = 0xffffffff.toInt()
+    const val SURFACE = 0xfff2f3f5.toInt()
+    const val SECOND = 0xff6a7078.toInt()
+    const val RED = 0xffe62135.toInt()
+    const val WHITE = 0xff14161a.toInt()
     fun dp(a: Activity, value: Int): Int = (a.resources.displayMetrics.density * value).toInt()
     fun round(color: Int, radius: Float): GradientDrawable =
         GradientDrawable().apply { setColor(color); cornerRadius = radius }
@@ -95,12 +95,13 @@ internal class VideoCardAdapter(
     override fun onCreateViewHolder(parent:ViewGroup,viewType:Int):Holder {
         val outer=LinearLayout(activity).apply {
             orientation=LinearLayout.VERTICAL
-            setPadding(dp(12),dp(10),dp(12),dp(13))
+            setPadding(dp(10),dp(9),dp(10),dp(14))
+            setBackgroundColor(Color.WHITE)
         }
-        val width=activity.resources.displayMetrics.widthPixels - dp(24)
+        val width=activity.resources.displayMetrics.widthPixels - dp(20)
         val imgHeight = width * 9 / 16
         val frame=FrameLayout(activity).apply {
-            background=Palette.round(Palette.SURFACE,dp(15).toFloat())
+            background=Palette.round(Palette.SURFACE,dp(16).toFloat())
             clipToOutline=true
         }
         val cover=ImageView(activity).apply {
@@ -125,7 +126,7 @@ internal class VideoCardAdapter(
             setPadding(dp(2),dp(12),dp(2),0)
         }
         val avatarFrame=FrameLayout(activity).apply {
-            background=Palette.round(0xff27364d.toInt(), dp(40).toFloat())
+            background=Palette.round(0xffe6e7ec.toInt(), dp(40).toFloat())
             clipToOutline=true
         }
         val avatar=ImageView(activity).apply { scaleType=ImageView.ScaleType.CENTER_CROP }
@@ -173,10 +174,19 @@ internal class VideoCardAdapter(
         Thumbnails.show(h.avatar,video.avatar)
         h.itemView.setOnClickListener { onClick(video) }
         h.more.setOnClickListener {
-            android.app.AlertDialog.Builder(activity).setItems(arrayOf("تشغيل الفيديو","نسخ رابط الفيديو")) { _,which ->
-                if(which==0) onClick(video)
-                else (activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                    .setPrimaryClip(android.content.ClipData.newPlainText("رابط الفيديو",video.url))
+            android.app.AlertDialog.Builder(activity).setItems(arrayOf("تشغيل الفيديو","نسخ رابط الفيديو","حفظ للمشاهدة لاحقًا")) { _,which ->
+                when(which) {
+                    0 -> onClick(video)
+                    1 -> (activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                        .setPrimaryClip(android.content.ClipData.newPlainText("رابط الفيديو",video.url))
+                    2 -> {
+                        val prefs=activity.getSharedPreferences("egytube_library",0)
+                        val saved=prefs.getStringSet("saved_urls", emptySet()).orEmpty().toMutableSet()
+                        saved.add(video.url)
+                        prefs.edit().putStringSet("saved_urls",saved).apply()
+                        android.widget.Toast.makeText(activity,"تم الحفظ في مكتبتك",android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
             }.show()
         }
     }
