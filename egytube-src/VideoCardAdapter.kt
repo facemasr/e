@@ -83,7 +83,8 @@ internal object Thumbnails {
 
 internal class VideoCardAdapter(
     private val activity: Activity,
-    private val onClick:(VideoModel)->Unit
+    private val onClick:(VideoModel)->Unit,
+    private val dark:Boolean=false
 ): RecyclerView.Adapter<VideoCardAdapter.Holder>() {
     val items= mutableListOf<VideoModel>()
     private val d=activity.resources.displayMetrics.density
@@ -96,7 +97,7 @@ internal class VideoCardAdapter(
         val outer=LinearLayout(activity).apply {
             orientation=LinearLayout.VERTICAL
             setPadding(0,dp(6),0,dp(16))
-            setBackgroundColor(Color.WHITE)
+            setBackgroundColor(if(dark)0xff0f0f0f.toInt() else Color.WHITE)
         }
         val width=activity.resources.displayMetrics.widthPixels
         val imgHeight = width * 9 / 16
@@ -140,7 +141,7 @@ internal class VideoCardAdapter(
         val name=TextView(activity).apply {
             textSize=16f
             typeface=Typeface.DEFAULT_BOLD
-            setTextColor(Palette.WHITE)
+            setTextColor(if(dark)Color.WHITE else Palette.WHITE)
             maxLines=2
             gravity=Gravity.RIGHT
             textDirection=View.TEXT_DIRECTION_FIRST_STRONG
@@ -148,7 +149,7 @@ internal class VideoCardAdapter(
         }
         val details=TextView(activity).apply {
             textSize=12.5f
-            setTextColor(Palette.SECOND)
+            setTextColor(if(dark)0xffb7b7b7.toInt() else Palette.SECOND)
             maxLines=2
             gravity=Gravity.RIGHT
             textDirection=View.TEXT_DIRECTION_FIRST_STRONG
@@ -164,7 +165,7 @@ internal class VideoCardAdapter(
         }
         info.addView(more, LinearLayout.LayoutParams(dp(26),dp(45)))
         outer.addView(info)
-        outer.addView(View(activity).apply {setBackgroundColor(0xfff1f1f1.toInt())},
+        outer.addView(View(activity).apply {setBackgroundColor(if(dark)0xff262626.toInt() else 0xfff1f1f1.toInt())},
             LinearLayout.LayoutParams(-1,dp(1)))
         return Holder(outer,cover,avatar,name,details,duration,more)
     }
