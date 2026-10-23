@@ -43,13 +43,13 @@ internal class VideoPlaybackPanel(
         setShutterBackgroundColor(Color.BLACK)
     }
     private val overlay=FrameLayout(activity)
-    private val play=TextView(activity)
-    private val elapsed=TextView(activity)
-    private val duration=TextView(activity)
+    private lateinit var play:TextView
+    private lateinit var elapsed:TextView
+    private lateinit var duration:TextView
     private val seek=SeekBar(activity)
-    private val speed=TextView(activity)
-    private val quality=TextView(activity)
-    private val full=TextView(activity)
+    private lateinit var speed:TextView
+    private lateinit var quality:TextView
+    private lateinit var full:TextView
     private val title=TextView(activity)
     private val handler=Handler(Looper.getMainLooper())
     private var scrubbing=false
