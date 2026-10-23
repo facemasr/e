@@ -45,7 +45,7 @@ internal class VideoPlaybackPanel(
         setShutterBackgroundColor(Color.BLACK)
     }
     private val overlay=FrameLayout(activity)
-    private lateinit var watermark:View
+    private lateinit var watermark:LinearLayout
     private var miniMode=false
     private var pipMode=false
     private var adBanner:AdvertisementBanner?=null
