@@ -15,7 +15,7 @@ import java.util.concurrent.Executors
 /** Independent native catalogue powered by EGYSHOW public APIs (NOT a website WebView). */
 internal class EgyshowNativeCatalog(
     private val activity:Activity,
-    private val onPlay:(type:String,id:Long,title:String,poster:String,shareUrl:String)->Unit
+    private val onPlay:(type:String,id:Long,title:String,poster:String,shareUrl:String,genre:String)->Unit
 ) {
     companion object { const val HOST="https://egyshow.com" }
     private val executor=Executors.newSingleThreadExecutor()
@@ -304,7 +304,7 @@ internal class EgyshowNativeCatalog(
         val poster=if(group=="matches")item.optString("logo_url") else item.optString("poster_path")
         if(group=="movie" || group=="matches") {
             val type=if(group=="matches")"channel" else "movie"
-            onPlay(type,id,title,poster,shareUrl(item,group))
+            onPlay(type,id,title,poster,shareUrl(item,group),group)
             return
         }
         info.text="جارٍ جلب حلقات "+title+"..."
@@ -331,7 +331,7 @@ internal class EgyshowNativeCatalog(
                         .setItems(labels.toTypedArray()){_,which->
                             val ep=items[which]
                             onPlay("episode",ep.optLong("id"),title+" • "+labels[which],
-                                ep.optString("still_path").ifBlank{poster},shareUrl(item,group))
+                                ep.optString("still_path").ifBlank{poster},shareUrl(item,group),group)
                         }.setNegativeButton("إغلاق",null).show()
                 }
             }catch(e:Exception){
