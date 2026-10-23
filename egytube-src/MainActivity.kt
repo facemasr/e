@@ -979,7 +979,7 @@ class MainActivity:Activity() {
         // Site playback only uses ad creative approved through the existing EGYSHOW admin.
         // YouTube mode preserves the app's previous ad configuration.
         advertising.configureCampaign(managedAdHtml,siteTarget==null && youtubeId==null && explicitSiteSource==null)
-        pipAuthorizedSource=explicitSiteSource!=null || model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
+        pipAuthorizedSource=siteTarget!=null || explicitSiteSource!=null || model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
         // If a prior video is playing in the mini view, return the same video surface
         // to the standard player before beginning the selected video.
         if(miniActive) {
@@ -1268,8 +1268,16 @@ class MainActivity:Activity() {
     }
     private fun leavePlayer() {
         if(!isWatching)return
-        if(panel.exitFullIfNeeded())return
-        if(playingModel!=null && panel.player.mediaItemCount>0) {
+        if(websiteWatchActive && sitePlayer.isFullscreen()){sitePlayer.exitFullscreen();return}
+        if(!websiteWatchActive && panel.exitFullIfNeeded())return
+        if(websiteWatchActive && playingModel!=null){
+            miniActive=true
+            isWatching=false
+            (sitePlayer.root.parent as? ViewGroup)?.removeView(sitePlayer.root)
+            miniSlot.addView(sitePlayer.root,FrameLayout.LayoutParams(-1,-1))
+            miniTitle.text=playingModel?.title ?: "EGYSHOW"
+            miniHost.visibility=View.VISIBLE
+        } else if(playingModel!=null && panel.player.mediaItemCount>0) {
             miniActive=true
             isWatching=false
             panel.setMiniMode(true)
@@ -1314,8 +1322,14 @@ class MainActivity:Activity() {
         if(!miniActive || inPip)return
         miniActive=false
         miniHost.visibility=View.GONE
-        attachPlayerToHost()
-        panel.setMiniMode(false)
+        if(websiteWatchActive){
+            attachSiteToHost()
+            sitePlayer.root.visibility=View.VISIBLE
+            panel.root.visibility=View.GONE
+        }else{
+            attachPlayerToHost()
+            panel.setMiniMode(false)
+        }
         isWatching=true
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
@@ -1334,10 +1348,18 @@ class MainActivity:Activity() {
         if(!miniActive)return
         miniActive=false
         miniHost.visibility=View.GONE
-        (panel.root.parent as? ViewGroup)?.removeView(panel.root)
-        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,dp(233)))
-        panel.setMiniMode(false)
-        panel.player.stop()
+        if(websiteWatchActive) {
+            sitePlayer.stop()
+            attachSiteToHost()
+            panel.root.visibility=View.VISIBLE
+            websiteWatchActive=false
+            playingSiteMedia=false
+        } else {
+            (panel.root.parent as? ViewGroup)?.removeView(panel.root)
+            playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
+            panel.setMiniMode(false)
+            panel.player.stop()
+        }
         playingModel=null
     }
     private fun enterPip() {
@@ -1346,11 +1368,12 @@ class MainActivity:Activity() {
             return
         }
         if(Build.VERSION.SDK_INT<26 || !this::panel.isInitialized)return
-        if(!(isWatching || miniActive) || panel.player.mediaItemCount<1)return
+        if(!(isWatching || miniActive) || (!websiteWatchActive && panel.player.mediaItemCount<1))return
+        val surface=if(websiteWatchActive)sitePlayer.root else panel.root
         val location=IntArray(2)
-        panel.root.getLocationOnScreen(location)
+        surface.getLocationOnScreen(location)
         val rect=Rect(location[0],location[1],
-            location[0]+panel.root.width,location[1]+panel.root.height)
+            location[0]+surface.width,location[1]+surface.height)
         val builder=PictureInPictureParams.Builder()
             .setAspectRatio(Rational(16,9))
         if(!rect.isEmpty)builder.setSourceRectHint(rect)
@@ -1365,7 +1388,8 @@ class MainActivity:Activity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if(Build.VERSION.SDK_INT>=26 && pipAuthorizedSource && (isWatching || miniActive) &&
-            this::panel.isInitialized && panel.player.isPlaying)enterPip()
+            this::panel.isInitialized && (if(websiteWatchActive)playingSiteMedia else panel.player.isPlaying))enterPip()
+        else if(websiteWatchActive && !playingSiteMedia)sitePlayer.web.onPause()
         else if(this::panel.isInitialized && !pipAuthorizedSource)panel.player.pause()
     }
     override fun onPictureInPictureRequested():Boolean {
@@ -1379,10 +1403,11 @@ class MainActivity:Activity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode,newConfig)
         inPip=isInPictureInPictureMode
         if(isInPictureInPictureMode) {
-            panel.setPipMode(true)
+            if(!websiteWatchActive)panel.setPipMode(true)
             miniHost.visibility=View.GONE
-            (panel.root.parent as? ViewGroup)?.removeView(panel.root)
-            pipHost.addView(panel.root,FrameLayout.LayoutParams(-1,-1))
+            val surface=if(websiteWatchActive)sitePlayer.root else panel.root
+            (surface.parent as? ViewGroup)?.removeView(surface)
+            pipHost.addView(surface,FrameLayout.LayoutParams(-1,-1))
             pipHost.visibility=View.VISIBLE
             root.visibility=View.GONE
         } else {
@@ -1390,9 +1415,12 @@ class MainActivity:Activity() {
             root.visibility=View.VISIBLE
             miniActive=false
             miniHost.visibility=View.GONE
-            attachPlayerToHost()
-            panel.setPipMode(false)
-            panel.setMiniMode(false)
+            if(websiteWatchActive)attachSiteToHost()
+            else {
+                attachPlayerToHost()
+                panel.setPipMode(false)
+                panel.setMiniMode(false)
+            }
             isWatching=true
             playerHost.visibility=View.VISIBLE
             playerDetails.visibility=View.VISIBLE
@@ -1438,6 +1466,7 @@ class MainActivity:Activity() {
     }
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if(sitePlayer.isFullscreen()){sitePlayer.exitFullscreen();return}
         if(isWatching)leavePlayer()
         else if(siteCatalogActive){siteCatalogActive=false;siteCatalog.hide();loadTrending()}
         else if(webMode) {
