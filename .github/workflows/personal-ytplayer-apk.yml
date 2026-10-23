@@ -1,7 +1,7 @@
 name: Build Personal YT Player APK
 on:
   push:
-    branches: [egytube-custom-player-download-v037]
+    branches: [egytube-pro-player-share-slider-v038]
   workflow_dispatch:
 permissions:
   contents: read
@@ -55,8 +55,8 @@ jobs:
                   applicationId = "com.personal.ytplayer"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 10
-                  versionName = "0.3.7"
+                  versionCode = 11
+                  versionName = "0.3.8"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -71,6 +71,7 @@ jobs:
               implementation("androidx.media3:media3-exoplayer-dash:1.11.1")
               implementation("androidx.media3:media3-ui:1.11.1")
               implementation("androidx.recyclerview:recyclerview:1.4.0")
+              implementation("org.jsoup:jsoup:1.18.3")
           }
           EOF
           cat > app/src/main/AndroidManifest.xml <<'EOF'
@@ -89,6 +90,12 @@ jobs:
                           <action android:name="android.intent.action.SEND"/>
                           <category android:name="android.intent.category.DEFAULT"/>
                           <data android:mimeType="text/plain"/>
+                      </intent-filter>
+                      <intent-filter>
+                          <action android:name="android.intent.action.VIEW"/>
+                          <category android:name="android.intent.category.DEFAULT"/>
+                          <category android:name="android.intent.category.BROWSABLE"/>
+                          <data android:scheme="https" android:host="egyshow.com" android:path="/watch"/>
                       </intent-filter>
                   </activity>
               </application>
@@ -478,6 +485,6 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: EGYTUBE-v0.3.7-debug-apk
+          name: EGYTUBE-v0.3.8-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
