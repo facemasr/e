@@ -845,6 +845,30 @@ class MainActivity:Activity() {
             Toast.makeText(this,"تم نسخ الرابط",Toast.LENGTH_SHORT).show()
         },LinearLayout.LayoutParams(-2,-2).apply {leftMargin=dp(10)})
         playerDetails.addView(actions)
+        val relatedChips=HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled=false
+        }
+        val relatedRow=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
+            setPadding(0,dp(8),0,dp(8))
+        }
+        fun relatedTab(label:String,filter:(VideoModel)->Boolean) {
+            relatedRow.addView(clickable(label,{
+                val matching=cachedVideos.filter(filter).filter{it.url!=model.url}
+                adapter.replaceAll(matching.ifEmpty {cachedVideos.filter{it.url!=model.url}})
+                status.text=label+" • "+adapter.itemCount+" فيديو"
+            }),LinearLayout.LayoutParams(-2,dp(36)).apply {rightMargin=dp(8)})
+        }
+        relatedTab("الكل"){true}
+        relatedTab("من القناة"){it.channel.isNotBlank() && it.channel==model.channel}
+        relatedTab("مشابه"){categoryOf(it)==categoryOf(model)}
+        relatedTab("من السلسلة"){
+            val key=model.title.trim().split(Regex("\\s+")).take(2).joinToString(" ")
+            key.length>5 && it.title.contains(key,true)
+        }
+        relatedChips.addView(relatedRow)
+        playerDetails.addView(relatedChips,LinearLayout.LayoutParams(-1,dp(55)))
         sectionTitle.text="قد يعجبك أيضًا"
         sectionTitle.visibility=View.VISIBLE
         status.text="جارٍ تجهيز المشغل..."
