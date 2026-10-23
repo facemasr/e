@@ -1,7 +1,7 @@
 name: Build Personal YT Player APK
 on:
   push:
-    branches: [egytube-fix-v031]
+    branches: [egytube-ads-v032]
   workflow_dispatch:
 permissions:
   contents: read
@@ -55,8 +55,8 @@ jobs:
                   applicationId = "com.personal.ytplayer"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 4
-                  versionName = "0.3.1"
+                  versionCode = 5
+                  versionName = "0.3.2"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -478,6 +478,6 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: EGYTUBE-v0.3.1-debug-apk
+          name: EGYTUBE-v0.3.2-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
