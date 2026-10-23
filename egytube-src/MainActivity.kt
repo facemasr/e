@@ -99,6 +99,45 @@ class MainActivity:Activity() {
     private var currentQuality=-1
     private var playingModel:VideoModel?=null
     private var customTerm:String?=null
+    private var homeMode="مقترح"
+    private var lastRecordedUrl:String?=null
+    private fun categoryOf(model:VideoModel):String {
+        val title=(model.title+" "+model.channel).lowercase(Locale.ROOT)
+        return when {
+            listOf("موسيقى","أغنية","اغنية","song","music","شيرين","مهرجان").any{title.contains(it)} -> "موسيقى"
+            listOf("مسلسل","دراما","الحلقة","episode","drama","كوري").any{title.contains(it)} -> "مسلسلات"
+            listOf("فيلم","movie","film","سينما","trailer").any{title.contains(it)} -> "أفلام"
+            listOf("كرة","مباراة","football","soccer","رياضة","هدف","sport").any{title.contains(it)} -> "رياضة"
+            listOf("game","gaming","لعبة","العاب","ألعاب","minecraft","pubg").any{title.contains(it)} -> "ألعاب"
+            listOf("تقنية","هاتف","android","tech","برمجة","computer","iphone").any{title.contains(it)} -> "تقنية"
+            listOf("أخبار","خبر","news","عاجل").any{title.contains(it)} -> "أخبار"
+            listOf("anime","انمي","أنمي","animation").any{title.contains(it)} -> "أنمي"
+            else -> "متنوع"
+        }
+    }
+    private fun recordWatching(model:VideoModel) {
+        if(lastRecordedUrl==model.url)return
+        lastRecordedUrl=model.url
+        val category=categoryOf(model)
+        val preferences=getSharedPreferences("egytube_interests",0)
+        preferences.edit().putInt("total",preferences.getInt("total",0)+1)
+            .putInt("count_"+category, preferences.getInt("count_"+category,0)+1)
+            .putString("last_category",category).apply()
+    }
+    private fun recommendedScore(video:VideoModel):Double {
+        val preferences=getSharedPreferences("egytube_interests",0)
+        val interest=preferences.getInt("count_"+categoryOf(video),0)
+        val followed=getSharedPreferences("egytube_library",0)
+            .getStringSet("followed_channels",emptySet()).orEmpty().contains(video.channel)
+        val popularity=kotlin.math.ln(video.views.coerceAtLeast(0L).toDouble()+1.0)
+        return interest*16.0+popularity+(if(followed)18.0 else 0.0)
+    }
+    private fun homeTitle():String = when(homeMode) {
+        "الأكثر مشاهدة" -> "الأكثر مشاهدة الآن"
+        "الأحدث" -> "أحدث الفيديوهات"
+        else -> if(getSharedPreferences("egytube_interests",0).getInt("total",0)>0)
+            "محتوى قد يعجبك" else "فيديوهات مختارة لك"
+    }
     private val options = linkedMapOf(
         "OM" to "عُمان","SA" to "السعودية","EG" to "مصر",
         "AE" to "الإمارات","KW" to "الكويت","QA" to "قطر",
@@ -250,11 +289,11 @@ class MainActivity:Activity() {
         categories.addView(chips)
         root.addView(categories,LinearLayout.LayoutParams(-1,dp(49)))
 
-        sectionTitle=baseText("الرائج في "+countryLabel,19f,true).apply {
+        sectionTitle=baseText(homeTitle(),19f,true).apply {
             setPadding(dp(17),dp(12),dp(10),dp(4))
         }
         root.addView(sectionTitle)
-        status=baseText("جارٍ تحميل الفيديوهات الرائجة...",12.5f,false,Palette.SECOND).apply {
+        status=baseText("جارٍ تحميل الفيديوهات...",12.5f,false,Palette.SECOND).apply {
             setPadding(dp(17),0,dp(17),dp(8))
         }
         root.addView(status)
@@ -286,6 +325,11 @@ class MainActivity:Activity() {
             { expandMini() }
         )
         panel.playbackError={ error -> runOnUiThread { status.text=error;status.visibility=View.VISIBLE } }
+        panel.player.addListener(object:androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(isPlaying:Boolean) {
+                if(isPlaying && playingModel!=null) recordWatching(playingModel!!)
+            }
+        })
         playerHost=LinearLayout(this).apply {
             orientation=LinearLayout.VERTICAL
             visibility=View.GONE
@@ -535,8 +579,12 @@ class MainActivity:Activity() {
         val sorted=when(sortMode) {
             "الأكثر مشاهدة" -> selected.sortedByDescending{it.views}
             "الأحدث تقريبًا" -> selected.sortedBy{approximateAge(it.published)}
-            else -> selected
+            else -> if(customTerm.isNullOrBlank() &&
+                getSharedPreferences("egytube_interests",0).getInt("total",0)>0)
+                selected.sortedByDescending { recommendedScore(it) }
+                else selected.sortedByDescending { it.views }
         }
+        if(!isWatching && customTerm.isNullOrBlank()) sectionTitle.text=homeTitle()
         adapter.replaceAll(sorted)
         extraRow.removeAllViews()
         val extra=extraItems.filter{
@@ -565,7 +613,7 @@ class MainActivity:Activity() {
         val keys=options.keys.toList()
         val names=options.values.toTypedArray()
         android.app.AlertDialog.Builder(this)
-            .setTitle("اختر البلد للفيديوهات الرائجة")
+            .setTitle("اختيار بلد المحتوى")
             .setSingleChoiceItems(names,keys.indexOf(country)) { dialog,which ->
                 country=keys[which]; countryLabel=options[country] ?: country
                 NewPipe.setPreferredContentCountry(ContentCountry(country))
@@ -597,8 +645,8 @@ class MainActivity:Activity() {
         else "https://m.youtube.com/results?search_query="+Uri.encode(term.orEmpty())+
             "&gl="+Uri.encode(country)+"&hl=ar"
         if(trending) {
-            sectionTitle.text="استكشاف الفيديوهات في "+countryLabel
-            status.text="تعذّر تحميل قائمة الرائج من محرك الجلب. هذه صفحة استكشاف يوتيوب، وليست ترتيبًا رسميًا للأكثر بحثًا."
+            sectionTitle.text=homeTitle()
+            status.text="تعذّر جلب المقترحات. عرضنا صفحة استكشاف الفيديوهات بديلًا؛ لا تمثل قائمة الأكثر مشاهدة."
         } else {
             status.text="تعذّر استخراج نتائج البحث؛ عُرضت صفحة نتائج يوتيوب داخل التطبيق كبديل."
         }
@@ -616,8 +664,8 @@ class MainActivity:Activity() {
         inFlight=true
         currentExtractor=null;nextPage=null;customTerm=null
         extraItems.clear()
-        sectionTitle.text="الرائج في "+countryLabel
-        status.text="جارٍ جلب الفيديوهات الرائجة في "+countryLabel
+        sectionTitle.text=homeTitle()
+        status.text="جارٍ تجهيز مقترحات الفيديو..."
         moreButton.visibility=View.GONE
         worker.execute {
             try {
@@ -634,8 +682,8 @@ class MainActivity:Activity() {
                     cachedVideos.clear();cachedVideos.addAll(videos)
                     extraItems.clear()
                     applyFilters()
-                    status.text=if(videos.isEmpty()) "لا توجد فيديوهات رائجة متاحة حاليًا." else
-                        "فيديوهات رائجة في "+countryLabel+" • "+videos.size+" نتيجة"
+                    status.text=if(videos.isEmpty()) "لا توجد فيديوهات متاحة حاليًا." else
+                        "الفيديوهات المحمّلة: "+videos.size+" • اختر فئة من الأعلى"
                     moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
                 }
             } catch(e:Exception) {
@@ -745,6 +793,7 @@ class MainActivity:Activity() {
             panel.setMiniMode(false)
         }
         playingModel=model
+        lastRecordedUrl=null
         isWatching=true
         searchRow.visibility=View.GONE
         categories.visibility=View.GONE
@@ -884,7 +933,7 @@ class MainActivity:Activity() {
         categories.visibility=View.VISIBLE
         webResults.visibility=if(webMode)View.VISIBLE else View.GONE
         list.visibility=if(webMode)View.GONE else View.VISIBLE
-        sectionTitle.text=if(customTerm.isNullOrBlank()) "الرائج في "+countryLabel
+        sectionTitle.text=if(customTerm.isNullOrBlank()) homeTitle()
             else "نتائج البحث عن: "+customTerm
         moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
     }
