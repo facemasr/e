@@ -1262,6 +1262,17 @@ class MainActivity:Activity() {
         sectionTitle.text=if(customTerm.isNullOrBlank()) homeTitle()
             else "نتائج البحث عن: "+customTerm
         moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
+        if(siteCatalogActive) {
+            siteCatalog.root.visibility=View.VISIBLE
+            categories.visibility=View.GONE
+            shortSeriesSlider.root.visibility=View.GONE
+            sectionTitle.visibility=View.GONE
+            status.visibility=View.GONE
+            searchTools.visibility=View.GONE
+            list.visibility=View.GONE
+            webResults.visibility=View.GONE
+            moreButton.visibility=View.GONE
+        }
     }
     private fun expandMini() {
         if(!miniActive || inPip)return
