@@ -198,8 +198,9 @@ class MainActivity:Activity() {
         window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         buildUI()
         val deepId=intent?.data?.let { url ->
-            if(url.scheme=="https" && url.host=="egyshow.com" && url.path=="/watch")
-                url.getQueryParameter("egy")?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+            if(url.scheme=="https" &&
+                (url.host=="youtube.com" || url.host=="www.youtube.com" || url.host=="youtu.be"))
+                youtubeVideoId(url.toString())
             else null
         }
         if(deepId!=null) {
@@ -307,7 +308,7 @@ class MainActivity:Activity() {
             "الكل" to "", "مقترح لك" to "@for-you", "الأكثر مشاهدة" to "@popular",
             "الأحدث" to "@new", "موسيقى" to "موسيقى", "دراما" to "مسلسلات دراما",
             "أفلام" to "أفلام", "رياضة" to "رياضة", "ألعاب" to "الألعاب",
-            "مباشر" to "بث مباشر", "أخبار" to "أخبار"
+            "أخبار" to "أخبار"
         )) {
             val term=entry.second
             val selected=(term=="@for-you" && homeMode=="مقترح") || (term=="@popular" && homeMode=="الأكثر مشاهدة")
@@ -453,6 +454,7 @@ class MainActivity:Activity() {
                     val uri=request?.url ?: return false
                     if(!request.isForMainFrame)return false
                     val host=uri.host.orEmpty().lowercase(Locale.ROOT)
+                    if(uri.path?.startsWith("/live/")==true)return true
                     // Only YouTube URLs are allowed in fallback discovery.
                     if(!(host=="youtube.com" || host.endsWith(".youtube.com") || host=="youtu.be"))return true
                     val id=when {
@@ -566,8 +568,8 @@ class MainActivity:Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         val url=intent.data ?:return
-        if(url.scheme!="https" || url.host!="egyshow.com" || url.path!="/watch")return
-        val id=url.getQueryParameter("egy")?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))} ?:return
+        if(url.scheme!="https")return
+        val id=youtubeVideoId(url.toString()) ?:return
         openPlayer(VideoModel("https://www.youtube.com/watch?v="+id,
             "فيديو يوتيوب","",-1L,-1L,"","","",false,false))
     }
@@ -637,7 +639,7 @@ class MainActivity:Activity() {
             }.show()
     }
     private fun chooseType() {
-        val values=arrayOf("الكل","فيديوهات","مباشر","القنوات","قوائم التشغيل")
+        val values=arrayOf("الكل","فيديوهات")
         android.app.AlertDialog.Builder(this).setTitle("تصفية الصفحة الحالية")
             .setSingleChoiceItems(values,values.indexOf(typeFilter)){dialog,which->
                 typeFilter=values[which];applyFilters();dialog.dismiss()
@@ -665,11 +667,7 @@ class MainActivity:Activity() {
         return amount*multiplier
     }
     private fun applyFilters() {
-        val selected=when(typeFilter) {
-            "مباشر" -> cachedVideos.filter {it.isLive}
-            "القنوات","قوائم التشغيل" -> emptyList()
-            else -> cachedVideos.toList()
-        }
+        val selected=cachedVideos.filterNot { it.isLive }
         val sorted=when(sortMode) {
             "الأكثر مشاهدة" -> selected.sortedByDescending{it.views}
             "الأحدث تقريبًا" -> selected.sortedBy{approximateAge(it.published)}
@@ -681,14 +679,7 @@ class MainActivity:Activity() {
         if(!isWatching && customTerm.isNullOrBlank()) sectionTitle.text=homeTitle()
         adapter.replaceAll(sorted)
         extraRow.removeAllViews()
-        val extra=extraItems.filter{
-            when(typeFilter) {
-                "القنوات" -> it is ChannelInfoItem
-                "قوائم التشغيل" -> it is PlaylistInfoItem
-                "الكل" -> it is ChannelInfoItem || it is PlaylistInfoItem
-                else -> false
-            }
-        }
+        val extra=emptyList<InfoItem>()
         extra.take(12).forEach { item ->
             val prefix=if(item is ChannelInfoItem)"قناة" else "قائمة"
             extraRow.addView(clickable(prefix+" • "+item.name,{
@@ -734,10 +725,9 @@ class MainActivity:Activity() {
         list.visibility=View.GONE
         webResults.visibility=View.VISIBLE
         moreButton.visibility=View.GONE
-        val url=if(trending)
-            "https://m.youtube.com/?gl="+Uri.encode(country)+"&hl=ar"
-        else "https://m.youtube.com/results?search_query="+Uri.encode(term.orEmpty())+
-            "&gl="+Uri.encode(country)+"&hl=ar"
+        val phrase=if(trending)"فيديوهات جديدة متنوعة" else term.orEmpty()
+        val url="https://m.youtube.com/results?search_query="+Uri.encode(phrase)+
+            "&sp=EgIQAQ%3D%3D&gl="+Uri.encode(country)+"&hl=ar"
         if(trending) {
             sectionTitle.text=homeTitle()
             status.text="تعذّر جلب المقترحات. عرضنا صفحة استكشاف الفيديوهات بديلًا؛ لا تمثل قائمة الأكثر مشاهدة."
@@ -765,26 +755,50 @@ class MainActivity:Activity() {
         moreButton.visibility=View.GONE
         worker.execute {
             try {
+                // The default YouTube kiosk switched to "Live"; do NOT use it here.
+                // Use standard video searches so the home feed never consists of live cards.
                 NewPipe.setPreferredContentCountry(ContentCountry(country))
-                val extractor=ServiceList.YouTube.kioskList.defaultKioskExtractor
-                extractor.fetchPage()
-                val page=extractor.initialPage
-                val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom)
+                val phrases=listOf(
+                    "فيديوهات عربية جديدة",
+                    "دراما قصيرة الحلقة الأولى",
+                    "أفلام قصيرة وقصص",
+                    "موسيقى وفيديوهات منوعة"
+                )
+                val combined=mutableListOf<VideoModel>()
+                var selected:ListExtractor<out InfoItem>?=null
+                var continuation:Page?=null
+                for(phrase in phrases) {
+                    if(token!=currentToken)return@execute
+                    try {
+                        val ex=ServiceList.YouTube.getSearchExtractor(phrase)
+                        ex.fetchPage()
+                        val page=ex.initialPage
+                        val safe=page.items.filterIsInstance<StreamInfoItem>()
+                            .map(::modelFrom).filterNot{it.isLive}
+                        if(safe.isNotEmpty() && selected==null) {
+                            selected=ex
+                            continuation=page.nextPage
+                        }
+                        combined.addAll(safe)
+                    }catch(_:Exception){}
+                    if(combined.size>=50)break
+                }
+                val videos=combined.distinctBy{it.url}.take(75)
+                if(videos.isEmpty())throw IllegalStateException("لا تتوفر نتائج فيديو الآن")
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false
-                    currentExtractor=extractor
-                    nextPage=page.nextPage
+                    currentExtractor=selected
+                    nextPage=continuation
                     cachedVideos.clear();cachedVideos.addAll(videos)
                     extraItems.clear()
                     applyFilters()
-                    status.text=if(videos.isEmpty()) "لا توجد فيديوهات متاحة حاليًا." else
-                        "الفيديوهات المحمّلة: "+videos.size+" • اختر فئة من الأعلى"
+                    status.text="فيديوهات يوتيوب • "+videos.size+" فيديو"
                     moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
                 }
-            } catch(e:Exception) {
+            } catch(_:Exception) {
                 runOnUiThread {
-                    if(token!=currentToken)return@runOnUiThread
+                    if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false
                     cachedVideos.clear()
                     adapter.replaceAll(emptyList())
@@ -830,8 +844,8 @@ class MainActivity:Activity() {
                 val extractor=ServiceList.YouTube.getSearchExtractor(term)
                 extractor.fetchPage()
                 val page=extractor.initialPage
-                val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom)
-                val others=page.items.filter{it is ChannelInfoItem || it is PlaylistInfoItem}
+                val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom).filterNot{it.isLive}
+                val others=emptyList<InfoItem>()
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false;currentExtractor=extractor;nextPage=page.nextPage
@@ -860,12 +874,12 @@ class MainActivity:Activity() {
         worker.execute {
             try {
                 val page=ex.getPage(pg)
-                val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom)
+                val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom).filterNot{it.isLive}
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false;nextPage=page.nextPage
                     cachedVideos.addAll(videos)
-                    extraItems.addAll(page.items.filter{it is ChannelInfoItem || it is PlaylistInfoItem})
+                    // Only recorded videos are added to the feed.
                     applyFilters()
                     moreButton.text="عرض المزيد"
                     moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
