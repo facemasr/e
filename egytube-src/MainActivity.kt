@@ -443,40 +443,42 @@ class MainActivity:Activity() {
         // A stable full-window stage keeps a floating in-app mini-player and PiP surface.
         screen=FrameLayout(this).apply {setBackgroundColor(Palette.BG)}
         screen.addView(root,FrameLayout.LayoutParams(-1,-1))
+        // Floating bottom player keeps the SAME ExoPlayer instance.
         miniHost=LinearLayout(this).apply {
-            orientation=LinearLayout.VERTICAL
+            orientation=LinearLayout.HORIZONTAL
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
+            gravity=Gravity.CENTER_VERTICAL
             visibility=View.GONE
-            background=Palette.round(Color.WHITE,dp(14).toFloat())
+            background=Palette.round(0xfff8e9ee.toInt(),dp(16).toFloat())
             elevation=dp(12).toFloat()
             clipToOutline=true
+            setPadding(dp(5),dp(5),dp(7),dp(5))
         }
-        miniSlot=FrameLayout(this).apply {setBackgroundColor(Color.BLACK)}
-        miniHost.addView(miniSlot,LinearLayout.LayoutParams(-1,dp(126)))
-        val miniBar=LinearLayout(this).apply {
-            orientation=LinearLayout.HORIZONTAL
-            gravity=Gravity.CENTER_VERTICAL
-            setPadding(dp(5),0,dp(3),0)
+        miniSlot=FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            clipToOutline=true
         }
-        miniTitle=baseText("EGYTUBE",11f,true).apply {
-            maxLines=1
+        miniHost.addView(miniSlot,LinearLayout.LayoutParams(dp(137),dp(74)))
+        miniTitle=baseText("EGYTUBE",12f,true).apply {
+            maxLines=2
+            gravity=Gravity.RIGHT or Gravity.CENTER_VERTICAL
             ellipsize=android.text.TextUtils.TruncateAt.END
+            setPadding(dp(8),0,dp(5),0)
             setOnClickListener { expandMini() }
         }
-        miniBar.addView(miniTitle,LinearLayout.LayoutParams(0,-1,1f))
-        miniBar.addView(baseText("▣",17f,true).apply {
+        miniHost.addView(miniTitle,LinearLayout.LayoutParams(0,-1,1f))
+        miniHost.addView(baseText("⌃",25f,true).apply {
             gravity=Gravity.CENTER
-            contentDescription="تكبير الفيديو"
-            setOnClickListener { expandMini() }
-        },LinearLayout.LayoutParams(dp(32),dp(37)))
-        miniBar.addView(baseText("×",23f,true).apply {
+            contentDescription="توسيع المشغل"
+            setOnClickListener {expandMini()}
+        },LinearLayout.LayoutParams(dp(32),-1))
+        miniHost.addView(baseText("×",23f,true).apply {
             gravity=Gravity.CENTER
-            contentDescription="إغلاق المشغل المصغر"
+            contentDescription="إغلاق المشغل"
             setOnClickListener {closeMini()}
-        },LinearLayout.LayoutParams(dp(33),dp(37)))
-        miniHost.addView(miniBar,LinearLayout.LayoutParams(-1,dp(39)))
-        screen.addView(miniHost,FrameLayout.LayoutParams(dp(228),dp(165),
-            Gravity.BOTTOM or Gravity.END).apply {
-                bottomMargin=dp(79);rightMargin=dp(12)
+        },LinearLayout.LayoutParams(dp(34),-1))
+        screen.addView(miniHost,FrameLayout.LayoutParams(-1,dp(84),Gravity.BOTTOM).apply {
+            bottomMargin=dp(71);leftMargin=dp(8);rightMargin=dp(8)
         })
         pipHost=FrameLayout(this).apply {
             visibility=View.GONE
