@@ -87,7 +87,10 @@ internal class ShortSeriesCarousel(
                         !pathname.startsWith("/ar/short-series/") ||
                         pathname.removePrefix("/ar/short-series/").isBlank() ||
                         !seen.add(url))return@mapNotNull null
-                    val posterEl=anchor.selectFirst("img")
+                    // EGYSHOW posters are sibling elements inside <article>, not
+                    // children of the title/detail anchor.
+                    val card=anchor.closest("article")
+                    val posterEl=anchor.selectFirst("img") ?: card?.selectFirst("img.poster-art, img")
                     val image=if(posterEl==null)"" else {
                         listOf("data-src","data-lazy-src","src","data-original")
                             .firstNotNullOfOrNull { key ->
@@ -98,9 +101,11 @@ internal class ShortSeriesCarousel(
                                 }
                             }.orEmpty()
                     }
-                    val title=anchor.attr("title").ifBlank {
-                        posterEl?.attr("alt").orEmpty()
-                    }.ifBlank { anchor.text() }.trim().replace(Regex("\\s+")," ")
+                    val title=card?.selectFirst(".poster-title")?.text().orEmpty()
+                        .ifBlank { posterEl?.attr("alt").orEmpty() }
+                        .ifBlank { anchor.attr("aria-label").removePrefix("تشغيل") }
+                        .ifBlank { anchor.text() }
+                        .trim().replace(Regex("\\s+")," ")
                         .removePrefix("مسلسل قصير").trim()
                     if(title.length<2) return@mapNotNull null
                     Series(url,title,image)
