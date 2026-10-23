@@ -69,6 +69,7 @@ class MainActivity:Activity() {
     private var sortMode="الملاءمة"
     private lateinit var categories:HorizontalScrollView
     private lateinit var sectionTitle:TextView
+    private lateinit var searchTools:LinearLayout
     private lateinit var status:TextView
     private lateinit var list:RecyclerView
     private lateinit var webResults:WebView
@@ -315,7 +316,7 @@ class MainActivity:Activity() {
             setPadding(dp(17),0,dp(17),dp(8))
         }
         root.addView(status)
-        val searchTools=LinearLayout(this).apply {
+        searchTools=LinearLayout(this).apply {
             orientation=LinearLayout.HORIZONTAL
             layoutDirection=View.LAYOUT_DIRECTION_RTL
             gravity=Gravity.CENTER_VERTICAL
@@ -823,6 +824,8 @@ class MainActivity:Activity() {
         panel.player.stop()
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
+        searchTools.visibility=View.GONE
+        extraResults.visibility=View.GONE
         playerDetails.removeAllViews()
         val name=baseText(model.title,18f,true).apply { maxLines=3 }
         playerDetails.addView(name)
@@ -973,6 +976,8 @@ class MainActivity:Activity() {
         }
         playerHost.visibility=View.GONE
         playerDetails.visibility=View.GONE
+        searchTools.visibility=View.VISIBLE
+        extraResults.visibility=if(extraItems.isNotEmpty())View.VISIBLE else View.GONE
         searchRow.visibility=View.VISIBLE
         categories.visibility=View.VISIBLE
         webResults.visibility=if(webMode)View.VISIBLE else View.GONE
@@ -1074,6 +1079,9 @@ class MainActivity:Activity() {
         sectionTitle.visibility=if(fullscreen)View.GONE else View.VISIBLE
         status.visibility=if(fullscreen)View.GONE else View.VISIBLE
         playerDetails.visibility=if(fullscreen)View.GONE else if(isWatching)View.VISIBLE else View.GONE
+        searchTools.visibility=if(fullscreen || isWatching)View.GONE else View.VISIBLE
+        extraResults.visibility=if(fullscreen || isWatching || extraItems.isEmpty())View.GONE else View.VISIBLE
+        moreButton.visibility=if(fullscreen)View.GONE else if(nextPage!=null && !isWatching)View.VISIBLE else View.GONE
         list.visibility=if(fullscreen || webMode)View.GONE else View.VISIBLE
         webResults.visibility=if(fullscreen || isWatching || !webMode)View.GONE else View.VISIBLE
         if(Build.VERSION.SDK_INT>=35)root.requestApplyInsets()
