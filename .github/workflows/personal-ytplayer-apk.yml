@@ -1,7 +1,7 @@
 name: Build Personal YT Player APK
 on:
   push:
-    branches: [egytube-standalone-restored-v047]
+    branches: [egytube-four-ad-placements-v048]
   workflow_dispatch:
 permissions:
   contents: read
@@ -55,8 +55,8 @@ jobs:
                   applicationId = "com.personal.ytplayer"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 13
-                  versionName = "0.4.0"
+                  versionCode = 14
+                  versionName = "0.4.1"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -78,6 +78,8 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
               <application android:label="EGYTUBE" android:icon="@drawable/egytube_logo" android:usesCleartextTraffic="false"
                   android:supportsRtl="true" android:theme="@android:style/Theme.Material.NoActionBar">
                   <activity android:name=".MainActivity" android:exported="true" android:supportsPictureInPicture="true" android:resizeableActivity="true" android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|uiMode|keyboardHidden">
@@ -92,6 +94,8 @@ jobs:
                       </intent-filter>
 
                   </activity>
+                  <service android:name=".BackgroundPlaybackService"
+                      android:exported="false" android:foregroundServiceType="mediaPlayback"/>
               </application>
           </manifest>
           EOF
@@ -479,6 +483,6 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: EGYTUBE-v0.4.0-standalone-debug-apk
+          name: EGYTUBE-v0.4.1-four-ads-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
