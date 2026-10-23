@@ -71,6 +71,9 @@ class MainActivity:Activity() {
     private lateinit var extraResults:HorizontalScrollView
     private lateinit var shortSeriesSlider:ShortSeriesCarousel
     private lateinit var siteCatalog:EgyshowNativeCatalog
+    private lateinit var sitePlayer:OriginalEgyshowPlayer
+    private lateinit var siteSearch:EgyshowSearchFirst
+    private var websiteWatchActive=false
     private var siteCatalogActive=false
     private var currentSiteCategory="movie"
     private lateinit var extraRow:LinearLayout
@@ -219,6 +222,8 @@ class MainActivity:Activity() {
 
     private fun buildUI() {
         if(this::siteCatalog.isInitialized)siteCatalog.dispose()
+        if(this::siteSearch.isInitialized)siteSearch.dispose()
+        if(this::sitePlayer.isInitialized)sitePlayer.dispose()
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
         siteCatalogActive=false
         miniActive=false
@@ -383,6 +388,10 @@ class MainActivity:Activity() {
         }
         extraResults.addView(extraRow)
         root.addView(extraResults,LinearLayout.LayoutParams(-1,dp(65)))
+        siteSearch=EgyshowSearchFirst(this) { record ->
+            siteCatalog.openSearchHit(record)
+        }
+        root.addView(siteSearch.root,LinearLayout.LayoutParams(-1,-2))
         panel=VideoPlaybackPanel(this,
             { leavePlayer() },
             { chooseQuality() },
@@ -422,6 +431,8 @@ class MainActivity:Activity() {
             visibility=View.GONE
         }
         playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
+        sitePlayer=OriginalEgyshowPlayer(this)
+        playerHost.addView(sitePlayer.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
         root.addView(playerHost,LinearLayout.LayoutParams(-1,-2))
         // The clearly labelled advertising placement belongs INSIDE the player frame.
         advertising=AdvertisementBanner(this)
@@ -624,72 +635,13 @@ class MainActivity:Activity() {
         }finally{conn.disconnect()}
     }
     private fun playEgyshowContent(kind:String,id:Long,title:String,poster:String,shareUrl:String){
-        if(id<=0L || !listOf("movie","episode","channel").contains(kind))return
-        Toast.makeText(this,"جارٍ التحقق من صلاحيات المشاهدة...",Toast.LENGTH_SHORT).show()
-        val token=++currentToken
-        worker.execute{
-            try{
-                val context=requestSiteJson("/api/v1/player/context?target_type=$kind&target_id=$id")
-                val sources=context.optJSONArray("sources")
-                    ?:throw IllegalStateException("لا توجد سيرفرات مشاهدة")
-                val managedAd=try {
-                    val placements=requestSiteJson("/api/v1/ads/placements?placements=overlay,banner,pause"+
-                        "&device_type=app&target_type=$kind&target_id=$id")
-                        .optJSONObject("placements")
-                    val ad=placements?.optJSONObject("overlay")
-                        ?: placements?.optJSONObject("banner")
-                        ?: placements?.optJSONObject("pause")
-                    ad?.optString("code_html")?.takeIf{it.isNotBlank()}
-                }catch(_:Exception){null}
-                val playable=mutableListOf<StreamChoice>()
-                var reason="لم يتوفر مصدر فيديو مناسب"
-                // Reuse the site's existing server ordering, backup and per-source lease policy.
-                for(i in 0 until kotlin.math.min(sources.length(),6)){
-                    val source=sources.optJSONObject(i)?:continue
-                    val sourceId=source.optLong("id",0)
-                    if(sourceId<=0L || source.optInt("is_active",1)==0)continue
-                    if(source.optString("last_status").lowercase(Locale.ROOT) in listOf("offline","failed"))continue
-                    try {
-                        val lease=requestSiteJson("/api/v1/player/source/$sourceId/lease",
-                            JSONObject().put("target_type",kind).put("target_id",id)
-                                .put("allow_failover",true))
-                        val raw=lease.optString("playUrl")
-                        val resolved=if(raw.startsWith("/"))"https://egyshow.com"+raw else raw
-                        val uri=Uri.parse(resolved)
-                        if(uri.scheme!="https" || uri.host.isNullOrBlank())continue
-                        val type=lease.optString("type").lowercase(Locale.ROOT)
-                        val mime=when(type) {
-                            "hls"->MimeTypes.APPLICATION_M3U8
-                            "dash"->MimeTypes.APPLICATION_MPD
-                            "video"->null
-                            else->{reason="نوع المصدر $type لا يدعمه المشغل الأصلي";continue}
-                        }
-                        playable.add(StreamChoice("EGYSHOW • "+source.optString("server_name","مصدر"),resolved,null,mime))
-                    }catch(e:Exception){reason=e.message?:reason}
-                }
-                val selected=playable.firstOrNull()?:throw IllegalStateException(reason)
-                runOnUiThread{
-                    if(isDestroyed||token!=currentToken)return@runOnUiThread
-                    val media=VideoModel(selected.url,title,"EGYSHOW",-1L,-1L,"",poster,"",false,kind=="channel")
-                    openPlayer(media,selected,managedAd)
-                    siteShareUrl=shareUrl
-                    sourceOptions.clear()
-                    sourceOptions.addAll(playable)
-                    currentQuality=0
-                    if(this::watchNotice.isInitialized){
-                        watchNotice.text="سيرفرات إيجي شو المتوافقة: "+playable.size
-                    }
-                }
-            }catch(e:Exception){
-                runOnUiThread{
-                    if(!isDestroyed&&token==currentToken)
-                        android.app.AlertDialog.Builder(this)
-                            .setTitle("تعذّر تشغيل محتوى إيجي شو")
-                            .setMessage(e.message?:"تعذّر الاتصال بالمصدر")
-                            .setPositiveButton("حسنًا",null).show()
-                }
-            }
-        }
+        // Same exact production player URL and browser ad controller as the EGYSHOW website.
+        // No confirmation dialog, no client-side relay lease manipulation.
+        if(kind !in setOf("movie","episode","channel") || id<=0L)return
+        val watchUrl="https://egyshow.com/watch?target_type=$kind&target_id=$id&embed=1"
+        val model=VideoModel(watchUrl,title,"EGYSHOW",-1L,-1L,"",poster,"",false,kind=="channel")
+        openPlayer(model,siteTarget=kind to id)
+        siteShareUrl=shareUrl
     }
     private fun showSearch() {
         if(isWatching)leavePlayer()
@@ -1006,13 +958,15 @@ class MainActivity:Activity() {
     }
 
     private fun openPlayer(model:VideoModel, explicitSiteSource:StreamChoice?=null,
-                           managedAdHtml:String?=null) {
-        playingSiteMedia=explicitSiteSource!=null
+                           managedAdHtml:String?=null,siteTarget:Pair<String,Long>?=null) {
+        val youtubeId=if(siteTarget==null)youtubeVideoId(model.url) else null
+        websiteWatchActive=siteTarget!=null || youtubeId!=null
+        playingSiteMedia=siteTarget!=null || explicitSiteSource!=null
         switchingSiteServer=false
         siteShareUrl=null
         // Site playback only uses ad creative approved through the existing EGYSHOW admin.
         // YouTube mode preserves the app's previous ad configuration.
-        advertising.configureCampaign(managedAdHtml,explicitSiteSource==null)
+        advertising.configureCampaign(managedAdHtml,siteTarget==null && youtubeId==null && explicitSiteSource==null)
         pipAuthorizedSource=explicitSiteSource!=null || model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
         // If a prior video is playing in the mini view, return the same video surface
         // to the standard player before beginning the selected video.
@@ -1020,7 +974,16 @@ class MainActivity:Activity() {
             miniActive=false
             miniHost.visibility=View.GONE
             attachPlayerToHost()
+            attachSiteToHost()
             panel.setMiniMode(false)
+        }
+        if(websiteWatchActive) {
+            panel.player.stop()
+            panel.root.visibility=View.GONE
+            sitePlayer.root.visibility=View.VISIBLE
+        } else {
+            sitePlayer.stop()
+            panel.root.visibility=View.VISIBLE
         }
         playingModel=model
         shortSeriesSlider.root.visibility=View.GONE
@@ -1102,6 +1065,16 @@ class MainActivity:Activity() {
         list.scrollToPosition(0)
         sourceOptions.clear();currentQuality=-1
         val token=++currentToken
+        if(siteTarget!=null) {
+            sitePlayer.show(siteTarget.first,siteTarget.second)
+            watchNotice.text="مشغّل EGYSHOW الأصلي • السيرفرات والإعلانات من لوحة تحكم الموقع"
+            return
+        }
+        if(youtubeId!=null) {
+            sitePlayer.showYoutube(youtubeId)
+            watchNotice.text="مشغّل EGYSHOW لفيديوهات YouTube"
+            return
+        }
         if(explicitSiteSource!=null) {
             sourceOptions.add(explicitSiteSource)
             selectQuality(0)
@@ -1274,7 +1247,11 @@ class MainActivity:Activity() {
 
     private fun attachPlayerToHost() {
         (panel.root.parent as? ViewGroup)?.removeView(panel.root)
-        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,dp(233)))
+        playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
+    }
+    private fun attachSiteToHost() {
+        (sitePlayer.root.parent as? ViewGroup)?.removeView(sitePlayer.root)
+        playerHost.addView(sitePlayer.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
     }
     private fun leavePlayer() {
         if(!isWatching)return
