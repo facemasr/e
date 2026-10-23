@@ -1,7 +1,7 @@
 name: Build Personal YT Player APK
 on:
   push:
-    branches: [egyshow-original-player-search-v042]
+    branches: [egyshow-youtube-restored-v043]
   workflow_dispatch:
 permissions:
   contents: read
@@ -55,8 +55,8 @@ jobs:
                   applicationId = "com.egyshow.nativepreview"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 15
-                  versionName = "0.4.2"
+                  versionCode = 16
+                  versionName = "0.4.3"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -484,6 +484,6 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: EGYSHOW-Native-Preview-v0.4.2-debug-apk
+          name: EGYSHOW-Native-Preview-v0.4.3-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
