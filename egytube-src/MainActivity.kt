@@ -123,6 +123,9 @@ class MainActivity:Activity() {
     private var sourceOptions= mutableListOf<StreamChoice>()
     private var currentQuality=-1
     private var playingModel:VideoModel?=null
+    private var playingSiteMedia=false
+    private var siteShareUrl:String?=null
+    private var switchingSiteServer=false
     private var customTerm:String?=null
     private var homeMode="مقترح"
     private var lastRecordedUrl:String?=null
@@ -393,7 +396,15 @@ class MainActivity:Activity() {
             { shareActiveVideo() }
         )
         panel.playbackError={ error -> runOnUiThread {
-            if(this::watchNotice.isInitialized && isWatching) {
+            if(playingSiteMedia && !switchingSiteServer && isWatching &&
+                currentQuality>=0 && currentQuality+1<sourceOptions.size) {
+                switchingSiteServer=true
+                val next=currentQuality+1
+                watchNotice.text="تعذّر السيرفر الحالي. جارٍ تجربة سيرفر بديل "+(next+1)
+                selectQuality(next)
+                android.widget.Toast.makeText(this,"تجربة سيرفر بديل من إيجي شو",Toast.LENGTH_SHORT).show()
+                switchingSiteServer=false
+            }else if(this::watchNotice.isInitialized && isWatching) {
                 watchNotice.text=error
                 watchNotice.visibility=View.VISIBLE
             } else {
@@ -468,8 +479,8 @@ class MainActivity:Activity() {
             }
         }
         root.addView(webResults,LinearLayout.LayoutParams(-1,0,1f))
-        siteCatalog=EgyshowNativeCatalog(this) { kind,id,title,poster ->
-            playEgyshowContent(kind,id,title,poster)
+        siteCatalog=EgyshowNativeCatalog(this) { kind,id,title,poster,shareUrl ->
+            playEgyshowContent(kind,id,title,poster,shareUrl)
         }
         root.addView(siteCatalog.root,LinearLayout.LayoutParams(-1,0,1f))
         moreButton=baseText("عرض المزيد",14f,true,Palette.SECOND).apply {
@@ -612,7 +623,7 @@ class MainActivity:Activity() {
             return result
         }finally{conn.disconnect()}
     }
-    private fun playEgyshowContent(kind:String,id:Long,title:String,poster:String){
+    private fun playEgyshowContent(kind:String,id:Long,title:String,poster:String,shareUrl:String){
         if(id<=0L || !listOf("movie","episode","channel").contains(kind))return
         Toast.makeText(this,"جارٍ التحقق من صلاحيات المشاهدة...",Toast.LENGTH_SHORT).show()
         val token=++currentToken
@@ -630,12 +641,14 @@ class MainActivity:Activity() {
                         ?: placements?.optJSONObject("pause")
                     ad?.optString("code_html")?.takeIf{it.isNotBlank()}
                 }catch(_:Exception){null}
-                var choice:StreamChoice?=null
+                val playable=mutableListOf<StreamChoice>()
                 var reason="لم يتوفر مصدر فيديو مناسب"
-                for(i in 0 until kotlin.math.min(sources.length(),3)){
+                // Reuse the site's existing server ordering, backup and per-source lease policy.
+                for(i in 0 until kotlin.math.min(sources.length(),6)){
                     val source=sources.optJSONObject(i)?:continue
                     val sourceId=source.optLong("id",0)
                     if(sourceId<=0L || source.optInt("is_active",1)==0)continue
+                    if(source.optString("last_status").lowercase(Locale.ROOT) in listOf("offline","failed"))continue
                     try {
                         val lease=requestSiteJson("/api/v1/player/source/$sourceId/lease",
                             JSONObject().put("target_type",kind).put("target_id",id)
@@ -651,15 +664,21 @@ class MainActivity:Activity() {
                             "video"->null
                             else->{reason="نوع المصدر $type لا يدعمه المشغل الأصلي";continue}
                         }
-                        choice=StreamChoice("EGYSHOW • "+source.optString("server_name","مصدر"),resolved,null,mime)
-                        break
+                        playable.add(StreamChoice("EGYSHOW • "+source.optString("server_name","مصدر"),resolved,null,mime))
                     }catch(e:Exception){reason=e.message?:reason}
                 }
-                val selected=choice?:throw IllegalStateException(reason)
+                val selected=playable.firstOrNull()?:throw IllegalStateException(reason)
                 runOnUiThread{
                     if(isDestroyed||token!=currentToken)return@runOnUiThread
                     val media=VideoModel(selected.url,title,"EGYSHOW",-1L,-1L,"",poster,"",false,kind=="channel")
                     openPlayer(media,selected,managedAd)
+                    siteShareUrl=shareUrl
+                    sourceOptions.clear()
+                    sourceOptions.addAll(playable)
+                    currentQuality=0
+                    if(this::watchNotice.isInitialized){
+                        watchNotice.text="سيرفرات إيجي شو المتوافقة: "+playable.size
+                    }
                 }
             }catch(e:Exception){
                 runOnUiThread{
@@ -988,6 +1007,9 @@ class MainActivity:Activity() {
 
     private fun openPlayer(model:VideoModel, explicitSiteSource:StreamChoice?=null,
                            managedAdHtml:String?=null) {
+        playingSiteMedia=explicitSiteSource!=null
+        switchingSiteServer=false
+        siteShareUrl=null
         // Site playback only uses ad creative approved through the existing EGYSHOW admin.
         // YouTube mode preserves the app's previous ad configuration.
         advertising.configureCampaign(managedAdHtml,explicitSiteSource==null)
@@ -1141,6 +1163,7 @@ class MainActivity:Activity() {
         return id?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
     }
     private fun shareLink(item:VideoModel):String {
+        if(playingSiteMedia)return siteShareUrl ?: "https://egyshow.com/"
         val id=youtubeVideoId(item.url)
         return if(id==null)item.url else "https://egyshow.com/watch?egy="+id
     }
@@ -1161,6 +1184,13 @@ class MainActivity:Activity() {
     }
     private fun downloadActiveVideo() {
         val item=playingModel ?:return
+        if(playingSiteMedia){
+            android.app.AlertDialog.Builder(this)
+                .setTitle("تنزيل محتوى EGYSHOW")
+                .setMessage("تنزيل أفلام ومسلسلات الموقع يخضع لإذن المصدر وإعدادات التحميل في لوحة تحكم EGYSHOW. لا يمكن تنزيل رابط تشغيل مؤقت أو تجاوز صلاحيات المشاهدة.")
+                .setPositiveButton("حسنًا",null).show()
+            return
+        }
         val url=item.url.trim()
         val uri=try {Uri.parse(url)}catch (_:Exception){null}
         val path=uri?.path?.lowercase(Locale.ROOT).orEmpty()
@@ -1215,7 +1245,8 @@ class MainActivity:Activity() {
             Toast.makeText(this,"لا توجد جودات متاحة",Toast.LENGTH_SHORT).show()
             return
         }
-        android.app.AlertDialog.Builder(this).setTitle("جودة الفيديو")
+        android.app.AlertDialog.Builder(this)
+            .setTitle(if(playingSiteMedia)"سيرفرات المشاهدة • EGYSHOW" else "جودة الفيديو")
             .setSingleChoiceItems(sourceOptions.map { it.title }.toTypedArray(),currentQuality) { dialog,which ->
                 selectQuality(which);dialog.dismiss()
             }.setNegativeButton("إلغاء",null).show()
