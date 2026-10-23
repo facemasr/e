@@ -33,7 +33,9 @@ internal class VideoPlaybackPanel(
     private val activity:Activity,
     private val goBack:()->Unit,
     private val chooseQuality:()->Unit,
-    private val fullScreenChanged:(Boolean)->Unit
+    private val fullScreenChanged:(Boolean)->Unit,
+    private val requestPip:()->Unit,
+    private val expandMini:()->Unit
 ) {
     val player=ExoPlayer.Builder(activity).build()
     val root=FrameLayout(activity).apply { setBackgroundColor(Color.BLACK) }
@@ -43,6 +45,10 @@ internal class VideoPlaybackPanel(
         setShutterBackgroundColor(Color.BLACK)
     }
     private val overlay=FrameLayout(activity)
+    private lateinit var watermark:View
+    private var miniMode=false
+    private var pipMode=false
+    private var adBanner:AdvertisementBanner?=null
     private lateinit var play:TextView
     private lateinit var elapsed:TextView
     private lateinit var duration:TextView
@@ -56,7 +62,21 @@ internal class VideoPlaybackPanel(
     private var expanded=false
     var playbackError:((String)->Unit)?=null
     private var released=false
-    private val hideControls=Runnable { if (player.isPlaying) overlay.visibility=View.INVISIBLE }
+    private val hideControls=Runnable { if(player.isPlaying && !miniMode && !pipMode) overlay.visibility=View.INVISIBLE }
+    private val hideAd=Runnable { adBanner?.hidePlacement() }
+    private val showAd=object:Runnable {
+        override fun run() {
+            if(released)return
+            if(player.isPlaying && !miniMode && !pipMode) {
+                overlay.visibility=View.INVISIBLE
+                adBanner?.display()
+                handler.removeCallbacks(hideAd)
+                handler.postDelayed(hideAd,9000L)
+            }
+            handler.postDelayed(this,135000L)
+        }
+    }
+    private var adCycleScheduled=false
     private val progressLoop=object:Runnable {
         override fun run() {
             if(released)return
@@ -81,8 +101,14 @@ internal class VideoPlaybackPanel(
         root.addView(preview,FrameLayout.LayoutParams(-1,-1))
         val gesture=GestureDetector(activity,object:GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e:MotionEvent)=true
-            override fun onSingleTapConfirmed(e:MotionEvent):Boolean { toggle(); return true }
+            override fun onSingleTapConfirmed(e:MotionEvent):Boolean {
+                if(miniMode) expandMini()
+                else if(!pipMode) toggle()
+                return true
+            }
             override fun onDoubleTap(e:MotionEvent):Boolean {
+                if(miniMode) {expandMini();return true}
+                if(pipMode)return true
                 val forward=e.x > root.width/2f
                 val d=player.duration
                 val next=player.currentPosition + if(forward) 10000L else -10000L
@@ -96,7 +122,7 @@ internal class VideoPlaybackPanel(
             contentDescription="اضغط لعرض الأدوات أو مرتين للتقديم والتأخير"
         }
         root.addView(gestures,FrameLayout.LayoutParams(-1,-1))
-        val watermark=LinearLayout(activity).apply {
+        watermark=LinearLayout(activity).apply {
             orientation=LinearLayout.HORIZONTAL; gravity=Gravity.CENTER_VERTICAL
             setPadding(dp(7),dp(3),dp(7),dp(3))
             alpha=0.68f
@@ -122,8 +148,13 @@ internal class VideoPlaybackPanel(
         title.ellipsize=android.text.TextUtils.TruncateAt.END
         title.textSize=15f;title.setTextColor(Color.WHITE)
         top.addView(title,LinearLayout.LayoutParams(0,-2,1f))
+        val pip=button("▣",19f).apply {
+            contentDescription="مشغل نافذة صغيرة فوق التطبيقات"
+            setOnClickListener { requestPip() }
+        }
+        top.addView(pip,LinearLayout.LayoutParams(dp(42),dp(48)))
         full=button("⛶",21f).apply { setOnClickListener { toggleFull() } }
-        top.addView(full,LinearLayout.LayoutParams(dp(52),dp(48)))
+        top.addView(full,LinearLayout.LayoutParams(dp(46),dp(48)))
         panel.addView(top,LinearLayout.LayoutParams(-1,dp(50)))
         val middle=LinearLayout(activity).apply {
             orientation=LinearLayout.HORIZONTAL
@@ -203,11 +234,14 @@ internal class VideoPlaybackPanel(
         handler.post(progressLoop)
     }
     private fun toggle() {
+        adBanner?.hidePlacement()
         if(overlay.visibility==View.VISIBLE) {
             overlay.visibility=View.INVISIBLE;handler.removeCallbacks(hideControls)
         } else reveal()
     }
     private fun reveal(autohide:Boolean=true) {
+        adBanner?.hidePlacement()
+        if(miniMode || pipMode)return
         overlay.visibility=View.VISIBLE
         handler.removeCallbacks(hideControls)
         if(autohide)hideLater()
@@ -217,7 +251,40 @@ internal class VideoPlaybackPanel(
         handler.postDelayed(hideControls,4500)
     }
     fun setTitle(value:String) { title.text=value }
+    fun attachAd(banner:AdvertisementBanner) {
+        adBanner=banner
+        val width=kotlin.math.min(dp(336),activity.resources.displayMetrics.widthPixels-dp(12))
+        root.addView(banner,FrameLayout.LayoutParams(width,dp(84),Gravity.CENTER))
+        banner.hidePlacement()
+    }
+    fun setMiniMode(active:Boolean) {
+        miniMode=active
+        if(active) {
+            overlay.visibility=View.GONE
+            watermark.visibility=View.GONE
+            adBanner?.hidePlacement()
+        } else if(!pipMode) {
+            watermark.visibility=View.VISIBLE
+            reveal()
+        }
+    }
+    fun setPipMode(active:Boolean) {
+        pipMode=active
+        if(active) {
+            overlay.visibility=View.GONE
+            watermark.visibility=View.GONE
+            adBanner?.hidePlacement()
+        } else if(!miniMode) {
+            watermark.visibility=View.VISIBLE
+            reveal()
+        }
+    }
+
     fun setSource(media:MediaSource, resumePosition:Long) {
+        if(!adCycleScheduled) {
+            adCycleScheduled=true
+            handler.postDelayed(showAd,16000L)
+        }
         player.setMediaSource(media)
         player.prepare()
         if(resumePosition>0L)player.seekTo(resumePosition)
@@ -246,7 +313,9 @@ internal class VideoPlaybackPanel(
     }
     fun isExpanded()=expanded
     fun release() {
-        released=true;handler.removeCallbacksAndMessages(null)
+        released=true
+        adBanner?.hidePlacement()
+        handler.removeCallbacksAndMessages(null)
         preview.player=null;player.release()
     }
 }
