@@ -175,6 +175,7 @@ internal class VideoPlaybackPanel(
             scaleType=ImageView.ScaleType.FIT_CENTER
         },LinearLayout.LayoutParams(dp(28),dp(28)))
         watermark.addView(button("EGYTUBE",11f))
+        watermark.visibility=View.GONE // Keep the YouTube-style picture unobstructed.
         root.addView(watermark,FrameLayout.LayoutParams(-2,dp(36),Gravity.TOP or Gravity.END).apply {
             topMargin=dp(10);rightMargin=dp(10)
         })
@@ -190,40 +191,28 @@ internal class VideoPlaybackPanel(
             setPadding(dp(7),dp(4),dp(7),dp(4))
             setBackgroundColor(0xba050508.toInt())
         }
-        val back=button("➜",27f).apply {
-            contentDescription="العودة إلى الفيديوهات"
+        val back=button("⌄",27f).apply {
+            contentDescription="تصغير المشغّل والعودة إلى الفيديوهات"
             setOnClickListener { goBack() }
         }
         top.addView(back,LinearLayout.LayoutParams(dp(43),dp(48)))
-        val names=LinearLayout(activity).apply {
-            orientation=LinearLayout.VERTICAL
-            gravity=Gravity.CENTER_VERTICAL
-            setPadding(dp(8),0,dp(6),0)
-        }
-        title.apply {
-            text="EGYTUBE"
-            textSize=16.5f
-            maxLines=1
-            gravity=Gravity.RIGHT
-            ellipsize=android.text.TextUtils.TruncateAt.END
-            setTextColor(Color.WHITE)
-            typeface=Typeface.DEFAULT_BOLD
-        }
-        subtitle.apply {
-            text="مشغل فيديو"
-            textSize=11f
-            maxLines=1
-            gravity=Gravity.RIGHT
-            setTextColor(0xffc5c9d0.toInt())
-        }
-        names.addView(title)
-        names.addView(subtitle)
-        top.addView(names,LinearLayout.LayoutParams(0,-2,1f))
-        val pip=button("▣",20f).apply {
+        // YouTube-like overlay: collapse on the right, playback tools on the left.
+        top.addView(View(activity),LinearLayout.LayoutParams(0,1,1f))
+        val pip=button("▣",21f).apply {
             contentDescription="صورة داخل صورة للمحتوى المسموح"
             setOnClickListener { requestPip() }
         }
-        top.addView(pip,LinearLayout.LayoutParams(dp(43),dp(48)))
+        top.addView(pip,LinearLayout.LayoutParams(dp(44),dp(46)))
+        captions=button("CC",14f).apply {
+            contentDescription="الترجمة"
+            setOnClickListener { toggleCaptions() }
+        }
+        top.addView(captions,LinearLayout.LayoutParams(dp(44),dp(46)))
+        quality=button("⚙",23f).apply {
+            contentDescription="إعدادات الجودة والسرعة والترجمة"
+            setOnClickListener { showPlayerSettings() }
+        }
+        top.addView(quality,LinearLayout.LayoutParams(dp(45),dp(46)))
         panel.addView(top,LinearLayout.LayoutParams(-1,dp(57)))
 
         val middle=LinearLayout(activity).apply {
@@ -285,10 +274,9 @@ internal class VideoPlaybackPanel(
                 reveal()
             }
         })
-        bottom.addView(seek,LinearLayout.LayoutParams(-1,dp(24)))
         val toolRow=LinearLayout(activity).apply {
             orientation=LinearLayout.HORIZONTAL
-            layoutDirection=View.LAYOUT_DIRECTION_LTR
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
             gravity=Gravity.CENTER_VERTICAL
         }
         full=button("⛶",22f).apply {
@@ -296,16 +284,6 @@ internal class VideoPlaybackPanel(
             setOnClickListener { toggleFull() }
         }
         toolRow.addView(full,LinearLayout.LayoutParams(dp(40),dp(39)))
-        quality=button("⚙",23f).apply {
-            contentDescription="الإعدادات: الجودة والسرعة والترجمة"
-            setOnClickListener { showPlayerSettings() }
-        }
-        toolRow.addView(quality,LinearLayout.LayoutParams(dp(40),dp(39)))
-        captions=button("CC",15f).apply {
-            contentDescription="الترجمة"
-            setOnClickListener { toggleCaptions() }
-        }
-        toolRow.addView(captions,LinearLayout.LayoutParams(dp(45),dp(39)))
         share=button("↗",23f).apply {
             contentDescription="مشاركة الفيديو"
             setOnClickListener { requestShare();reveal() }
@@ -332,8 +310,9 @@ internal class VideoPlaybackPanel(
             }
         }
         toolRow.addView(volume,LinearLayout.LayoutParams(dp(43),dp(39)))
-        bottom.addView(toolRow,LinearLayout.LayoutParams(-1,dp(42)))
-        panel.addView(bottom,LinearLayout.LayoutParams(-1,dp(68)))
+        bottom.addView(toolRow,LinearLayout.LayoutParams(-1,dp(43)))
+        bottom.addView(seek,LinearLayout.LayoutParams(-1,dp(24)))
+        panel.addView(bottom,LinearLayout.LayoutParams(-1,dp(74)))
         overlay.addView(panel,FrameLayout.LayoutParams(-1,-1))
         root.addView(overlay,FrameLayout.LayoutParams(-1,-1))
         root.addView(buffering,FrameLayout.LayoutParams(dp(46),dp(46),Gravity.CENTER))
@@ -391,7 +370,7 @@ internal class VideoPlaybackPanel(
             watermark.visibility=View.GONE
             adBanner?.hidePlacement()
         } else if(!pipMode) {
-            watermark.visibility=View.VISIBLE
+            watermark.visibility=View.GONE
             reveal()
         }
     }
