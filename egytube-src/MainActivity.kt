@@ -435,6 +435,131 @@ class MainActivity:Activity() {
         }
     }
 
+    private fun showSearch() {
+        if(isWatching)leavePlayer()
+        searchRow.visibility=View.VISIBLE
+        searchBox.requestFocus()
+        (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+            .showSoftInput(searchBox,InputMethodManager.SHOW_IMPLICIT)
+    }
+    private fun showMenu() {
+        android.app.AlertDialog.Builder(this).setTitle("EGYTUBE")
+            .setItems(arrayOf("الرئيسية","البحث","اختيار البلد","المشاهدة لاحقًا","الترتيب","النوع")){_,n->
+                when(n) {
+                    0 -> loadTrending()
+                    1 -> showSearch()
+                    2 -> chooseCountry()
+                    3 -> showLibrary()
+                    4 -> chooseSort()
+                    5 -> chooseType()
+                }
+            }.show()
+    }
+    private fun showShorts() {
+        searchRow.visibility=View.VISIBLE
+        searchBox.setText("Shorts")
+        search()
+        sectionTitle.text="استكشاف Shorts"
+    }
+    private fun showSubscriptions() {
+        val followed=getSharedPreferences("egytube_library",0)
+            .getStringSet("followed_channels",emptySet()).orEmpty()
+        val matched=cachedVideos.filter { followed.contains(it.channel) }
+        if(matched.isEmpty()) {
+            android.app.AlertDialog.Builder(this).setTitle("الاشتراكات المحلية")
+                .setMessage("لم تتبع قنوات بعد. يمكنك متابعة قناة من قائمة الفيديو. هذه قائمة محلية داخل EGYTUBE، وليست مرتبطة بحساب يوتيوب.")
+                .setPositiveButton("حسنًا",null).show()
+        } else {
+            adapter.replaceAll(matched)
+            sectionTitle.text="قنواتك المتابعة محليًا"
+        }
+    }
+    private fun showLibrary() {
+        val urls=getSharedPreferences("egytube_library",0)
+            .getStringSet("saved_urls",emptySet()).orEmpty()
+        val matches=cachedVideos.filter {urls.contains(it.url)}
+        val terms=getSharedPreferences("egytube_search",0)
+            .getString("terms","").orEmpty().split("\n").filter {it.isNotBlank()}
+        android.app.AlertDialog.Builder(this).setTitle("مكتبتك")
+            .setItems(arrayOf("المشاهدة لاحقًا ("+urls.size+")","عمليات البحث السابقة")){_,index->
+                if(index==0) {
+                    adapter.replaceAll(matches)
+                    sectionTitle.text="المشاهدة لاحقًا"
+                    status.text=if(matches.isEmpty()) "لا توجد فيديوهات محفوظة ضمن الصفحة المحمّلة حاليًا."
+                        else "فيديوهات محفوظة: "+matches.size
+                } else {
+                    android.app.AlertDialog.Builder(this).setTitle("بحث سابق")
+                        .setItems(terms.take(12).toTypedArray()){_,which->
+                            if(which in terms.indices) {
+                                searchBox.setText(terms[which]);search()
+                            }
+                        }.show()
+                }
+            }.show()
+    }
+    private fun chooseType() {
+        val values=arrayOf("الكل","فيديوهات","مباشر","القنوات","قوائم التشغيل")
+        android.app.AlertDialog.Builder(this).setTitle("تصفية الصفحة الحالية")
+            .setSingleChoiceItems(values,values.indexOf(typeFilter)){dialog,which->
+                typeFilter=values[which];applyFilters();dialog.dismiss()
+            }.setNegativeButton("إلغاء",null).show()
+    }
+    private fun chooseSort() {
+        val values=arrayOf("الملاءمة","الأكثر مشاهدة","الأحدث تقريبًا")
+        android.app.AlertDialog.Builder(this).setTitle("ترتيب الصفحة الحالية")
+            .setSingleChoiceItems(values,values.indexOf(sortMode)){dialog,which->
+                sortMode=values[which];applyFilters();dialog.dismiss()
+            }.setNegativeButton("إلغاء",null).show()
+    }
+    private fun approximateAge(published:String):Long {
+        val t=published.lowercase(Locale.ROOT)
+        val amount=Regex("[0-9]+").find(t)?.value?.toLongOrNull() ?: 1L
+        val multiplier=when {
+            t.contains("دقيق") || t.contains("minute") -> 1L
+            t.contains("ساع") || t.contains("hour") -> 60L
+            t.contains("يوم") || t.contains("day") -> 1440L
+            t.contains("أسبوع") || t.contains("week") -> 10080L
+            t.contains("شهر") || t.contains("month") -> 43200L
+            t.contains("سن") || t.contains("year") -> 525600L
+            else -> 1000000L
+        }
+        return amount*multiplier
+    }
+    private fun applyFilters() {
+        val selected=when(typeFilter) {
+            "مباشر" -> cachedVideos.filter {it.isLive}
+            "القنوات","قوائم التشغيل" -> emptyList()
+            else -> cachedVideos.toList()
+        }
+        val sorted=when(sortMode) {
+            "الأكثر مشاهدة" -> selected.sortedByDescending{it.views}
+            "الأحدث تقريبًا" -> selected.sortedBy{approximateAge(it.published)}
+            else -> selected
+        }
+        adapter.replaceAll(sorted)
+        extraRow.removeAllViews()
+        val extra=extraItems.filter{
+            when(typeFilter) {
+                "القنوات" -> it is ChannelInfoItem
+                "قوائم التشغيل" -> it is PlaylistInfoItem
+                "الكل" -> it is ChannelInfoItem || it is PlaylistInfoItem
+                else -> false
+            }
+        }
+        extra.take(12).forEach { item ->
+            val prefix=if(item is ChannelInfoItem)"قناة" else "قائمة"
+            extraRow.addView(clickable(prefix+" • "+item.name,{
+                resetWebFallback()
+                webMode=true
+                list.visibility=View.GONE
+                webResults.visibility=View.VISIBLE
+                webResults.loadUrl(item.url)
+            }),LinearLayout.LayoutParams(-2,dp(48)).apply{rightMargin=dp(7)})
+        }
+        extraResults.visibility=if(extra.isEmpty())View.GONE else View.VISIBLE
+        status.text="النتائج المحمّلة: "+sorted.size+
+            if(extra.isNotEmpty())" • قنوات وقوائم: "+extra.size else ""
+    }
     private fun chooseCountry() {
         val keys=options.keys.toList()
         val names=options.values.toTypedArray()
