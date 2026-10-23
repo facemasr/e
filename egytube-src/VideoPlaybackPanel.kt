@@ -21,11 +21,13 @@ import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import java.util.Locale
 
 @OptIn(UnstableApi::class)
@@ -43,6 +45,7 @@ internal class VideoPlaybackPanel(
         useController=false
         player=this@VideoPlaybackPanel.player
         setShutterBackgroundColor(Color.BLACK)
+        resizeMode=AspectRatioFrameLayout.RESIZE_MODE_FIT
     }
     private val overlay=FrameLayout(activity)
     private lateinit var watermark:LinearLayout
@@ -60,6 +63,10 @@ internal class VideoPlaybackPanel(
     private val handler=Handler(Looper.getMainLooper())
     private var scrubbing=false
     private var expanded=false
+    private var videoWidth=0
+    private var videoHeight=0
+    private var videoPixelRatio=1f
+    private var videoRotation=0
     var playbackError:((String)->Unit)?=null
     private var released=false
     private val hideControls=Runnable { if(player.isPlaying && !miniMode && !pipMode) overlay.visibility=View.INVISIBLE }
@@ -219,6 +226,14 @@ internal class VideoPlaybackPanel(
         overlay.addView(panel,FrameLayout.LayoutParams(-1,-1))
         root.addView(overlay,FrameLayout.LayoutParams(-1,-1))
         player.addListener(object:Player.Listener {
+            override fun onVideoSizeChanged(videoSize:VideoSize) {
+                // Size comes from Media3's actual decoded video, not its poster.
+                videoWidth=videoSize.width
+                videoHeight=videoSize.height
+                videoPixelRatio=videoSize.pixelWidthHeightRatio
+                videoRotation=videoSize.unappliedRotationDegrees
+                if(expanded && !miniMode && !pipMode) applyVideoOrientation()
+            }
             override fun onPlaybackStateChanged(state:Int) {
                 if(state==Player.STATE_READY)hideLater()
             }
@@ -281,6 +296,10 @@ internal class VideoPlaybackPanel(
     }
 
     fun setSource(media:MediaSource, resumePosition:Long) {
+        videoWidth=0
+        videoHeight=0
+        videoPixelRatio=1f
+        videoRotation=0
         if(!adCycleScheduled) {
             adCycleScheduled=true
             handler.postDelayed(showAd,16000L)
@@ -299,10 +318,23 @@ internal class VideoPlaybackPanel(
                 player.setPlaybackSpeed(values[which]); speed.text=labels[which];dialog.dismiss();reveal()
             }.setNegativeButton("إلغاء",null).show()
     }
+    private fun videoIsLandscape():Boolean {
+        if(videoWidth<=0 || videoHeight<=0)return false
+        val pixelRatio=if(videoPixelRatio.isFinite() && videoPixelRatio>0f)videoPixelRatio else 1f
+        val rotated=videoRotation%180!=0
+        val width=if(rotated)videoHeight.toFloat() else videoWidth*pixelRatio
+        val height=if(rotated)videoWidth*pixelRatio else videoHeight.toFloat()
+        return width>height
+    }
+    private fun applyVideoOrientation() {
+        val wanted=if(videoIsLandscape()) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+        if(activity.requestedOrientation!=wanted)activity.requestedOrientation=wanted
+    }
     private fun toggleFull() {
         expanded=!expanded
-        activity.requestedOrientation=if(expanded)ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if(expanded)applyVideoOrientation()
+        else activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         fullScreenChanged(expanded)
         reveal()
     }
