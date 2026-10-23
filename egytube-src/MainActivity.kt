@@ -117,6 +117,16 @@ class MainActivity:Activity() {
     private fun stopBackgroundService(){
         try{stopService(Intent(this,BackgroundPlaybackService::class.java))}catch(_:Exception){}
     }
+    private fun startAllowedBackgroundPlayback(){
+        if(!isEligibleForBackground() || inPip)return
+        try{
+            val intent=Intent(this,BackgroundPlaybackService::class.java).apply {
+                action=BackgroundPlaybackService.ACTION_START
+                putExtra("title",playingModel?.title.orEmpty())
+            }
+            if(Build.VERSION.SDK_INT>=26)startForegroundService(intent) else startService(intent)
+        }catch(_:Exception){}
+    }
     private lateinit var footer:LinearLayout
     private lateinit var moreButton:TextView
     private var currentToken=0
@@ -1283,7 +1293,11 @@ class MainActivity:Activity() {
     }
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if(isEligibleForBackground())return // Audio continues for allowed files; no forced PiP.
+        if(isEligibleForBackground()){
+            // Start while still foreground: Android 12+ forbids arbitrary late FGS starts.
+            startAllowedBackgroundPlayback()
+            return
+        }
         if(Build.VERSION.SDK_INT>=26 && pipAuthorizedSource && (isWatching || miniActive) &&
             this::panel.isInitialized && panel.player.isPlaying)enterPip()
         else if(this::panel.isInitialized && !pipAuthorizedSource)panel.player.pause()
@@ -1358,16 +1372,7 @@ class MainActivity:Activity() {
     }
     override fun onStop() {
         if(isEligibleForBackground() && !inPip) {
-            try {
-                val intent=Intent(this,BackgroundPlaybackService::class.java).apply {
-                    action=BackgroundPlaybackService.ACTION_START
-                    putExtra("title",playingModel?.title.orEmpty())
-                }
-                if(Build.VERSION.SDK_INT>=26)startForegroundService(intent)
-                else startService(intent)
-            }catch(_:Exception) {
-                // On Android background-service denial, do not restart or loop.
-            }
+            startAllowedBackgroundPlayback()
         } else if(this::panel.isInitialized && !pipAuthorizedSource) {
             panel.player.pause()
         }
