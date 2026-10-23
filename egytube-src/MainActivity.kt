@@ -85,6 +85,7 @@ class MainActivity:Activity() {
     private lateinit var miniTitle:TextView
     private var miniActive=false
     private var inPip=false
+    private var pipAuthorizedSource=false
     private lateinit var footer:LinearLayout
     private lateinit var moreButton:TextView
     private var currentToken=0
@@ -585,6 +586,8 @@ class MainActivity:Activity() {
         )
 
     private fun displayWebFallback(term:String?, trending:Boolean) {
+        extraItems.clear()
+        extraResults.visibility=View.GONE
         webMode=true
         list.visibility=View.GONE
         webResults.visibility=View.VISIBLE
@@ -612,6 +615,7 @@ class MainActivity:Activity() {
         val token=++currentToken
         inFlight=true
         currentExtractor=null;nextPage=null;customTerm=null
+        extraItems.clear()
         sectionTitle.text="الرائج في "+countryLabel
         status.text="جارٍ جلب الفيديوهات الرائجة في "+countryLabel
         moreButton.visibility=View.GONE
@@ -627,7 +631,9 @@ class MainActivity:Activity() {
                     inFlight=false
                     currentExtractor=extractor
                     nextPage=page.nextPage
-                    adapter.replaceAll(videos)
+                    cachedVideos.clear();cachedVideos.addAll(videos)
+                    extraItems.clear()
+                    applyFilters()
                     status.text=if(videos.isEmpty()) "لا توجد فيديوهات رائجة متاحة حاليًا." else
                         "فيديوهات رائجة في "+countryLabel+" • "+videos.size+" نتيجة"
                     moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
@@ -636,6 +642,7 @@ class MainActivity:Activity() {
                 runOnUiThread {
                     if(token!=currentToken)return@runOnUiThread
                     inFlight=false
+                    cachedVideos.clear()
                     adapter.replaceAll(emptyList())
                     displayWebFallback(null,true)
                     moreButton.visibility=View.GONE
@@ -645,9 +652,20 @@ class MainActivity:Activity() {
     }
     private fun search() {
         val term=searchBox.text.toString().trim()
+        searchBox.dismissDropDown()
         if(term.isBlank()) {loadTrending();return}
+        val prefs=getSharedPreferences("egytube_search",0)
+        val old=prefs.getString("terms","").orEmpty().split("\n").filter{it.isNotBlank()}
+        prefs.edit().putString("terms",(listOf(term)+old.filter{it!=term}).take(30).joinToString("\n")).apply()
+        val direct=Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$")
+        if(direct.matches(term)) {
+            pipAuthorizedSource=true
+            openPlayer(VideoModel(term,Uri.parse(term).lastPathSegment ?: "فيديو شخصي","ملف فيديو",-1L,-1L,"","","",false,false))
+            return
+        }
         val link=Regex("https?://(?:www\\.)?(?:m\\.)?(?:youtube\\.com|youtu\\.be)/[^\\s]+",RegexOption.IGNORE_CASE).find(term)?.value
         if(link!=null) {
+            pipAuthorizedSource=false
             openPlayer(VideoModel(link,"فيديو يوتيوب","", -1,-1,"","","",false,false))
             return
         }
@@ -656,6 +674,8 @@ class MainActivity:Activity() {
         resetWebFallback()
         val token=++currentToken
         inFlight=true;currentExtractor=null;nextPage=null;customTerm=term
+        cachedVideos.clear();extraItems.clear()
+        extraResults.visibility=View.GONE
         moreButton.visibility=View.GONE
         sectionTitle.text="نتائج البحث عن: "+term
         status.text="جارٍ البحث في الفيديوهات..."
@@ -666,11 +686,14 @@ class MainActivity:Activity() {
                 extractor.fetchPage()
                 val page=extractor.initialPage
                 val videos=page.items.filterIsInstance<StreamInfoItem>().map(::modelFrom)
+                val others=page.items.filter{it is ChannelInfoItem || it is PlaylistInfoItem}
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false;currentExtractor=extractor;nextPage=page.nextPage
-                    adapter.replaceAll(videos)
-                    status.text=if(videos.isEmpty()) "لم يتم العثور على فيديوهات." else videos.size.toString()+" نتيجة"
+                    cachedVideos.clear();cachedVideos.addAll(videos)
+                    extraItems.clear();extraItems.addAll(others)
+                    applyFilters()
+                    status.text=if(videos.isEmpty() && others.isEmpty()) "لم يتم العثور على فيديوهات." else videos.size.toString()+" نتيجة"
                     moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
                 }
             } catch(e:Exception) {
@@ -696,7 +719,9 @@ class MainActivity:Activity() {
                 runOnUiThread {
                     if(isDestroyed || token!=currentToken)return@runOnUiThread
                     inFlight=false;nextPage=page.nextPage
-                    adapter.append(videos)
+                    cachedVideos.addAll(videos)
+                    extraItems.addAll(page.items.filter{it is ChannelInfoItem || it is PlaylistInfoItem})
+                    applyFilters()
                     moreButton.text="عرض المزيد"
                     moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
                 }
@@ -710,6 +735,7 @@ class MainActivity:Activity() {
     }
 
     private fun openPlayer(model:VideoModel) {
+        pipAuthorizedSource=model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
         // If a prior video is playing in the mini view, return the same video surface
         // to the standard player before beginning the selected video.
         if(miniActive) {
@@ -758,6 +784,18 @@ class MainActivity:Activity() {
         list.scrollToPosition(0)
         sourceOptions.clear();currentQuality=-1
         val token=++currentToken
+        if(pipAuthorizedSource) {
+            val url=model.url
+            val mime=when {
+                url.contains(".m3u8",true) -> MimeTypes.APPLICATION_M3U8
+                url.contains(".mpd",true) -> MimeTypes.APPLICATION_MPD
+                else -> null
+            }
+            sourceOptions.clear()
+            sourceOptions.add(StreamChoice("المصدر الأصلي",url,null,mime))
+            selectQuality(0)
+            return
+        }
         worker.execute {
             try {
                 val info=StreamInfo.getInfo(model.url)
@@ -876,6 +914,10 @@ class MainActivity:Activity() {
         playingModel=null
     }
     private fun enterPip() {
+        if(!pipAuthorizedSource) {
+            Toast.makeText(this,"PiP متاح للمحتوى المصرح بتشغيله فقط؛ فيديوهات YouTube غير مضمونة أو مدعومة هنا.",Toast.LENGTH_LONG).show()
+            return
+        }
         if(Build.VERSION.SDK_INT<26 || !this::panel.isInitialized)return
         if(!(isWatching || miniActive) || panel.player.mediaItemCount<1)return
         val location=IntArray(2)
@@ -895,11 +937,12 @@ class MainActivity:Activity() {
     }
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if(Build.VERSION.SDK_INT>=26 && (isWatching || miniActive) &&
+        if(Build.VERSION.SDK_INT>=26 && pipAuthorizedSource && (isWatching || miniActive) &&
             this::panel.isInitialized && panel.player.isPlaying)enterPip()
+        else if(this::panel.isInitialized && !pipAuthorizedSource)panel.player.pause()
     }
     override fun onPictureInPictureRequested():Boolean {
-        if(Build.VERSION.SDK_INT>=26 && (isWatching || miniActive)) {
+        if(Build.VERSION.SDK_INT>=26 && pipAuthorizedSource && (isWatching || miniActive)) {
             enterPip()
             return true
         }
@@ -953,6 +996,10 @@ class MainActivity:Activity() {
         }
     }
     override fun onConfigurationChanged(config:Configuration) {super.onConfigurationChanged(config)}
+    override fun onStop() {
+        if(this::panel.isInitialized && !pipAuthorizedSource)panel.player.pause()
+        super.onStop()
+    }
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if(isWatching)leavePlayer()
