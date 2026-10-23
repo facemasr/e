@@ -21,11 +21,13 @@ import android.widget.TextView
 import androidx.annotation.OptIn
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.AspectRatioFrameLayout
 import java.util.Locale
 
 @OptIn(UnstableApi::class)
@@ -35,12 +37,14 @@ internal class VideoPlaybackPanel(
     private val chooseQuality:()->Unit,
     private val fullScreenChanged:(Boolean)->Unit,
     private val requestPip:()->Unit,
-    private val expandMini:()->Unit
+    private val expandMini:()->Unit,
+    private val onVideoOrientationChanged:(Boolean)->Unit
 ) {
     val player=ExoPlayer.Builder(activity).build()
     val root=FrameLayout(activity).apply { setBackgroundColor(Color.BLACK) }
     private val preview=PlayerView(activity).apply {
         useController=false
+        resizeMode=AspectRatioFrameLayout.RESIZE_MODE_FIT
         player=this@VideoPlaybackPanel.player
         setShutterBackgroundColor(Color.BLACK)
     }
@@ -60,6 +64,26 @@ internal class VideoPlaybackPanel(
     private val handler=Handler(Looper.getMainLooper())
     private var scrubbing=false
     private var expanded=false
+    private var hasVideoDimensions=false
+    private var landscapeVideo=false
+    private fun displayOrientation():Int {
+        return if(landscapeVideo && hasVideoDimensions)
+            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+    }
+    private fun updateVideoDimensions(size:VideoSize) {
+        if(size.width<=0 || size.height<=0)return
+        val effectiveWidth=size.width.toDouble()*size.pixelWidthHeightRatio
+        val isLandscape=effectiveWidth > size.height*1.03
+        if(hasVideoDimensions && landscapeVideo==isLandscape)return
+        hasVideoDimensions=true
+        landscapeVideo=isLandscape
+        // Expand portrait clips vertically without rotating the handset.
+        onVideoOrientationChanged(!isLandscape)
+        if(expanded && !miniMode && !pipMode) {
+            activity.requestedOrientation=displayOrientation()
+        }
+    }
     var playbackError:((String)->Unit)?=null
     private var released=false
     private val hideControls=Runnable { if(player.isPlaying && !miniMode && !pipMode) overlay.visibility=View.INVISIBLE }
@@ -219,6 +243,9 @@ internal class VideoPlaybackPanel(
         overlay.addView(panel,FrameLayout.LayoutParams(-1,-1))
         root.addView(overlay,FrameLayout.LayoutParams(-1,-1))
         player.addListener(object:Player.Listener {
+            override fun onVideoSizeChanged(videoSize:VideoSize) {
+                updateVideoDimensions(videoSize)
+            }
             override fun onPlaybackStateChanged(state:Int) {
                 if(state==Player.STATE_READY)hideLater()
             }
@@ -281,6 +308,9 @@ internal class VideoPlaybackPanel(
     }
 
     fun setSource(media:MediaSource, resumePosition:Long) {
+        hasVideoDimensions=false
+        landscapeVideo=false
+        if(expanded)activity.requestedOrientation=displayOrientation()
         if(!adCycleScheduled) {
             adCycleScheduled=true
             handler.postDelayed(showAd,16000L)
@@ -301,7 +331,8 @@ internal class VideoPlaybackPanel(
     }
     private fun toggleFull() {
         expanded=!expanded
-        activity.requestedOrientation=if(expanded)ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        // Unknown or vertical media stays in portrait. Horizontal media rotates only when needed.
+        activity.requestedOrientation=if(expanded)displayOrientation()
             else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         fullScreenChanged(expanded)
         reveal()
@@ -313,6 +344,7 @@ internal class VideoPlaybackPanel(
     }
     fun isExpanded()=expanded
     fun release() {
+        activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         released=true
         adBanner?.hidePlacement()
         handler.removeCallbacksAndMessages(null)
