@@ -55,8 +55,8 @@ jobs:
                   applicationId = "com.personal.ytplayer"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 14
-                  versionName = "0.4.1"
+                  versionCode = 15
+                  versionName = "0.4.2"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -483,6 +483,6 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: EGYTUBE-v0.4.1-four-ads-debug-apk
+          name: EGYTUBE-v0.4.2-four-ads-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
