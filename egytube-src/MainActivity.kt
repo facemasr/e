@@ -971,14 +971,15 @@ class MainActivity:Activity() {
 
     private fun openPlayer(model:VideoModel, explicitSiteSource:StreamChoice?=null,
                            managedAdHtml:String?=null,siteTarget:Pair<String,Long>?=null) {
-        val youtubeId=if(siteTarget==null)youtubeVideoId(model.url) else null
-        websiteWatchActive=siteTarget!=null || youtubeId!=null
+        // Keep the original native EGYTUBE / NewPipe+Media3 engine for every YouTube clip.
+        // The website's own /watch player is ONLY used for EGYSHOW films, episodes and channels.
+        websiteWatchActive=siteTarget!=null
         playingSiteMedia=siteTarget!=null || explicitSiteSource!=null
         switchingSiteServer=false
         siteShareUrl=null
         // Site playback only uses ad creative approved through the existing EGYSHOW admin.
         // YouTube mode preserves the app's previous ad configuration.
-        advertising.configureCampaign(managedAdHtml,siteTarget==null && youtubeId==null && explicitSiteSource==null)
+        advertising.configureCampaign(managedAdHtml,siteTarget==null && explicitSiteSource==null)
         pipAuthorizedSource=siteTarget!=null || explicitSiteSource!=null || model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
         // If a prior video is playing in the mini view, return the same video surface
         // to the standard player before beginning the selected video.
@@ -1081,11 +1082,6 @@ class MainActivity:Activity() {
         if(siteTarget!=null) {
             sitePlayer.show(siteTarget.first,siteTarget.second)
             watchNotice.text="مشغّل EGYSHOW الأصلي • السيرفرات والإعلانات من لوحة تحكم الموقع"
-            return
-        }
-        if(youtubeId!=null) {
-            sitePlayer.showYoutube(youtubeId)
-            watchNotice.text="مشغّل EGYSHOW لفيديوهات YouTube"
             return
         }
         if(explicitSiteSource!=null) {
