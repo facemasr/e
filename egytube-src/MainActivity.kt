@@ -109,6 +109,14 @@ class MainActivity:Activity() {
     private var miniActive=false
     private var inPip=false
     private var pipAuthorizedSource=false
+    private fun backgroundEnabled():Boolean=
+        getSharedPreferences("egytube_settings",0).getBoolean("background_allowed_files",true)
+    private fun isEligibleForBackground():Boolean=
+        backgroundEnabled() && pipAuthorizedSource && !youtubeFallbackActive &&
+        this::panel.isInitialized && panel.player.isPlaying && (isWatching || miniActive)
+    private fun stopBackgroundService(){
+        try{stopService(Intent(this,BackgroundPlaybackService::class.java))}catch(_:Exception){}
+    }
     private lateinit var footer:LinearLayout
     private lateinit var moreButton:TextView
     private var currentToken=0
@@ -212,6 +220,7 @@ class MainActivity:Activity() {
         if(this::advertising.isInitialized) advertising.dispose()
         if(this::homeWideAd.isInitialized) homeWideAd.dispose()
         if(this::adapter.isInitialized) adapter.disposeAds()
+        stopBackgroundService()
         if(this::youtubeOfficial.isInitialized) youtubeOfficial.dispose()
         if(this::panel.isInitialized) panel.release()
         if(this::webResults.isInitialized) webResults.destroy()
@@ -573,7 +582,7 @@ class MainActivity:Activity() {
     }
     private fun showMenu() {
         android.app.AlertDialog.Builder(this).setTitle("EGYTUBE")
-            .setItems(arrayOf("الرئيسية","البحث","اختيار البلد","المشاهدة لاحقًا","الترتيب","النوع","التنزيلات")){_,n->
+            .setItems(arrayOf("الرئيسية","البحث","اختيار البلد","المشاهدة لاحقًا","الترتيب","النوع","التنزيلات","التشغيل في الخلفية")){_,n->
                 when(n) {
                     0 -> loadTrending()
                     1 -> showSearch()
@@ -582,6 +591,20 @@ class MainActivity:Activity() {
                     4 -> chooseSort()
                     5 -> chooseType()
                     6 -> DownloadCenter.show(this)
+                    7 -> {
+                        val current=backgroundEnabled()
+                        val choices=arrayOf("مفعّل للمصادر المباشرة المسموح بها",
+                            "متوقف")
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle("التشغيل في الخلفية")
+                            .setMessage("يستمر تشغيل ملفات الفيديو المباشرة المسموح بها عند الانتقال إلى تطبيق آخر، مع إشعار تشغيل. لا يشمل ذلك تجاوز قيود يوتيوب أو مشغّله الرسمي.")
+                            .setSingleChoiceItems(choices,if(current)0 else 1){dialog,which->
+                                getSharedPreferences("egytube_settings",0).edit()
+                                    .putBoolean("background_allowed_files",which==0).apply()
+                                if(which!=0)stopBackgroundService()
+                                dialog.dismiss()
+                            }.setNegativeButton("إلغاء",null).show()
+                    }
                 }
             }.show()
     }
@@ -1260,6 +1283,7 @@ class MainActivity:Activity() {
     }
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
+        if(isEligibleForBackground())return // Audio continues for allowed files; no forced PiP.
         if(Build.VERSION.SDK_INT>=26 && pipAuthorizedSource && (isWatching || miniActive) &&
             this::panel.isInitialized && panel.player.isPlaying)enterPip()
         else if(this::panel.isInitialized && !pipAuthorizedSource)panel.player.pause()
@@ -1328,8 +1352,25 @@ class MainActivity:Activity() {
         if(Build.VERSION.SDK_INT>=35)root.requestApplyInsets()
     }
     override fun onConfigurationChanged(config:Configuration) {super.onConfigurationChanged(config)}
+    override fun onStart() {
+        super.onStart()
+        stopBackgroundService()
+    }
     override fun onStop() {
-        if(this::panel.isInitialized && !pipAuthorizedSource)panel.player.pause()
+        if(isEligibleForBackground() && !inPip) {
+            try {
+                val intent=Intent(this,BackgroundPlaybackService::class.java).apply {
+                    action=BackgroundPlaybackService.ACTION_START
+                    putExtra("title",playingModel?.title.orEmpty())
+                }
+                if(Build.VERSION.SDK_INT>=26)startForegroundService(intent)
+                else startService(intent)
+            }catch(_:Exception) {
+                // On Android background-service denial, do not restart or loop.
+            }
+        } else if(this::panel.isInitialized && !pipAuthorizedSource) {
+            panel.player.pause()
+        }
         super.onStop()
     }
     @Deprecated("Deprecated in Java")
@@ -1345,6 +1386,7 @@ class MainActivity:Activity() {
     }
     override fun onDestroy() {
         ++currentToken
+        stopBackgroundService()
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
         if(this::adapter.isInitialized)adapter.disposeAds()
         if(this::homeWideAd.isInitialized)homeWideAd.dispose()
