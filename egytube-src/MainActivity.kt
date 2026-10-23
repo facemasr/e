@@ -273,18 +273,36 @@ class MainActivity:Activity() {
         val countryChip=clickable("◉  "+countryLabel,{ chooseCountry() })
         chips.addView(countryChip, LinearLayout.LayoutParams(-2,dp(40)).apply { rightMargin=dp(7) })
         for (entry in listOf(
-            "الكل" to "", "موسيقى" to "موسيقى", "ألعاب" to "الألعاب",
-            "مباشر" to "بث مباشر", "أخبار" to "الأخبار",
-            "رياضة" to "الرياضة", "أفلام" to "أفلام"
+            "الكل" to "", "مقترح لك" to "@for-you", "الأكثر مشاهدة" to "@popular",
+            "الأحدث" to "@new", "موسيقى" to "موسيقى", "دراما" to "مسلسلات دراما",
+            "أفلام" to "أفلام", "رياضة" to "رياضة", "ألعاب" to "الألعاب",
+            "مباشر" to "بث مباشر", "أخبار" to "أخبار"
         )) {
             val term=entry.second
+            val selected=(term=="@for-you" && homeMode=="مقترح") || (term=="@popular" && homeMode=="الأكثر مشاهدة")
             chips.addView(clickable(entry.first,{
-                if(term.isEmpty())loadTrending()
-                else {
-                    searchBox.setText(term)
-                    search()
+                when(term) {
+                    "" -> {homeMode="مقترح";sortMode="الملاءمة";loadTrending()}
+                    "@for-you" -> {
+                        homeMode="مقترح";sortMode="الملاءمة"
+                        if(customTerm!=null)loadTrending() else applyFilters()
+                    }
+                    "@popular" -> {
+                        homeMode="الأكثر مشاهدة";sortMode="الأكثر مشاهدة"
+                        if(customTerm!=null)loadTrending() else applyFilters()
+                    }
+                    "@new" -> {
+                        homeMode="الأحدث";sortMode="الأحدث تقريبًا"
+                        if(customTerm!=null)loadTrending() else applyFilters()
+                    }
+                    else -> {searchBox.setText(term);search()}
                 }
-            }),LinearLayout.LayoutParams(-2,dp(40)).apply { rightMargin=dp(7) })
+            }).apply {
+                if(selected) {
+                    background=Palette.round(0xff161616.toInt(),dp(17).toFloat())
+                    setTextColor(Color.WHITE)
+                }
+            },LinearLayout.LayoutParams(-2,dp(40)).apply { rightMargin=dp(7) })
         }
         categories.addView(chips)
         root.addView(categories,LinearLayout.LayoutParams(-1,dp(49)))
