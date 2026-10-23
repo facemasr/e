@@ -621,6 +621,15 @@ class MainActivity:Activity() {
                 val context=requestSiteJson("/api/v1/player/context?target_type=$kind&target_id=$id")
                 val sources=context.optJSONArray("sources")
                     ?:throw IllegalStateException("لا توجد سيرفرات مشاهدة")
+                val managedAd=try {
+                    val placements=requestSiteJson("/api/v1/ads/placements?placements=overlay,banner,pause"+
+                        "&device_type=app&target_type=$kind&target_id=$id")
+                        .optJSONObject("placements")
+                    val ad=placements?.optJSONObject("overlay")
+                        ?: placements?.optJSONObject("banner")
+                        ?: placements?.optJSONObject("pause")
+                    ad?.optString("code_html")?.takeIf{it.isNotBlank()}
+                }catch(_:Exception){null}
                 var choice:StreamChoice?=null
                 var reason="لم يتوفر مصدر فيديو مناسب"
                 for(i in 0 until kotlin.math.min(sources.length(),3)){
@@ -650,7 +659,7 @@ class MainActivity:Activity() {
                 runOnUiThread{
                     if(isDestroyed||token!=currentToken)return@runOnUiThread
                     val media=VideoModel(selected.url,title,"EGYSHOW",-1L,-1L,"",poster,"",false,kind=="channel")
-                    openPlayer(media,selected)
+                    openPlayer(media,selected,managedAd)
                 }
             }catch(e:Exception){
                 runOnUiThread{
@@ -977,7 +986,11 @@ class MainActivity:Activity() {
         }
     }
 
-    private fun openPlayer(model:VideoModel, explicitSiteSource:StreamChoice?=null) {
+    private fun openPlayer(model:VideoModel, explicitSiteSource:StreamChoice?=null,
+                           managedAdHtml:String?=null) {
+        // Site playback only uses ad creative approved through the existing EGYSHOW admin.
+        // YouTube mode preserves the app's previous ad configuration.
+        advertising.configureCampaign(managedAdHtml,explicitSiteSource==null)
         pipAuthorizedSource=explicitSiteSource!=null || model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
         // If a prior video is playing in the mini view, return the same video surface
         // to the standard player before beginning the selected video.
