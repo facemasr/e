@@ -95,7 +95,9 @@ class MainActivity:Activity() {
     private fun adjustNormalPlayerHeight() {
         if(!this::panel.isInitialized || !this::playerHost.isInitialized || panel.isExpanded())return
         if(isWatching && !miniActive && !inPip) {
-            panel.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
+            if(websiteWatchActive)
+                sitePlayer.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
+            else panel.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
         }
     }
     private lateinit var list:RecyclerView
@@ -598,6 +600,7 @@ class MainActivity:Activity() {
     }
     private fun showEgyshowCatalog(kind:String) {
         if(isWatching)leavePlayer()
+        if(this::siteSearch.isInitialized)siteSearch.hide()
         siteCatalogActive=true
         currentSiteCategory=kind
         if(miniActive)miniHost.visibility=View.VISIBLE
@@ -825,6 +828,7 @@ class MainActivity:Activity() {
         list.visibility=View.VISIBLE
     }
     private fun loadTrending() {
+        if(this::siteSearch.isInitialized)siteSearch.hide()
         siteCatalogActive=false
         if(this::siteCatalog.isInitialized)siteCatalog.hide()
         searchTools.visibility=View.VISIBLE
@@ -894,14 +898,22 @@ class MainActivity:Activity() {
         }
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).hideSoftInputFromWindow(searchBox.windowToken,0)
         searchBox.clearFocus()
+        siteCatalogActive=false
+        siteCatalog.hide()
+        siteSearch.search(term)
+        searchTools.visibility=View.VISIBLE
+        sectionTitle.visibility=View.VISIBLE
+        status.visibility=View.VISIBLE
+        list.visibility=View.VISIBLE
+        categories.visibility=View.VISIBLE
         resetWebFallback()
         val token=++currentToken
         inFlight=true;currentExtractor=null;nextPage=null;customTerm=term
         cachedVideos.clear();extraItems.clear()
         extraResults.visibility=View.GONE
         moreButton.visibility=View.GONE
-        sectionTitle.text="نتائج البحث عن: "+term
-        status.text="جارٍ البحث في الفيديوهات..."
+        sectionTitle.text="فيديوهات YouTube • "+term
+        status.text="جارٍ البحث في EGYSHOW وYouTube..."
         worker.execute {
             try {
                 NewPipe.setPreferredContentCountry(ContentCountry(country))
@@ -986,6 +998,7 @@ class MainActivity:Activity() {
             panel.root.visibility=View.VISIBLE
         }
         playingModel=model
+        siteSearch.root.visibility=View.GONE
         shortSeriesSlider.root.visibility=View.GONE
         if(this::siteCatalog.isInitialized)siteCatalog.hide()
         lastRecordedUrl=null
@@ -1278,12 +1291,14 @@ class MainActivity:Activity() {
         status.visibility=View.VISIBLE
         searchTools.visibility=View.VISIBLE
         shortSeriesSlider.root.visibility=if(customTerm.isNullOrBlank())View.VISIBLE else View.GONE
+        if(customTerm.isNullOrBlank())siteSearch.hide() else siteSearch.search(customTerm.orEmpty())
         webResults.visibility=if(webMode)View.VISIBLE else View.GONE
         list.visibility=if(webMode)View.GONE else View.VISIBLE
         sectionTitle.text=if(customTerm.isNullOrBlank()) homeTitle()
             else "نتائج البحث عن: "+customTerm
         moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
         if(siteCatalogActive) {
+            siteSearch.hide()
             siteCatalog.root.visibility=View.VISIBLE
             categories.visibility=View.GONE
             shortSeriesSlider.root.visibility=View.GONE
@@ -1396,6 +1411,7 @@ class MainActivity:Activity() {
         status.visibility=View.GONE
         searchTools.visibility=View.GONE
         extraResults.visibility=View.GONE
+        siteSearch.root.visibility=View.GONE
         moreButton.visibility=View.GONE
         playerDetails.visibility=if(fullscreen)View.GONE else if(isWatching)View.VISIBLE else View.GONE
         list.visibility=if(fullscreen || webMode)View.GONE else View.VISIBLE
@@ -1433,6 +1449,8 @@ class MainActivity:Activity() {
     }
     override fun onDestroy() {
         ++currentToken
+        if(this::siteSearch.isInitialized)siteSearch.dispose()
+        if(this::sitePlayer.isInitialized)sitePlayer.dispose()
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
         if(this::siteCatalog.isInitialized)siteCatalog.dispose()
         worker.shutdownNow()
