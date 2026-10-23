@@ -87,6 +87,8 @@ class MainActivity:Activity() {
         if(!this::panel.isInitialized || !this::playerHost.isInitialized || panel.isExpanded())return
         if(isWatching && !miniActive && !inPip) {
             panel.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
+            if(this::youtubeOfficial.isInitialized)
+                youtubeOfficial.root.layoutParams=LinearLayout.LayoutParams(-1,normalVideoHeight())
         }
     }
     private lateinit var list:RecyclerView
@@ -94,6 +96,7 @@ class MainActivity:Activity() {
     private var webMode=false
     private lateinit var adapter:VideoCardAdapter
     private lateinit var panel:VideoPlaybackPanel
+    private lateinit var youtubeOfficial:YoutubeOfficialFallback
     private lateinit var playerDetails:LinearLayout
     private lateinit var playerHost:LinearLayout
     private lateinit var advertising:AdvertisementBanner
@@ -385,7 +388,13 @@ class MainActivity:Activity() {
             { shareActiveVideo() }
         )
         panel.playbackError={ error -> runOnUiThread {
-            if(this::watchNotice.isInitialized && isWatching) {
+            // YouTube's extraction/stream URLs can change: fall back to its own
+            // official embeddable player instead of leaving the screen black.
+            if(isWatching && !pipAuthorizedSource &&
+                this::youtubeOfficial.isInitialized &&
+                playingModel?.let{youtubeVideoId(it.url)}!=null) {
+                showOfficialYoutubeFallback()
+            } else if(this::watchNotice.isInitialized && isWatching) {
                 watchNotice.text=error
                 watchNotice.visibility=View.VISIBLE
             } else {
@@ -403,6 +412,8 @@ class MainActivity:Activity() {
             visibility=View.GONE
         }
         playerHost.addView(panel.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
+        youtubeOfficial=YoutubeOfficialFallback(this)
+        playerHost.addView(youtubeOfficial.root,LinearLayout.LayoutParams(-1,normalVideoHeight()))
         root.addView(playerHost,LinearLayout.LayoutParams(-1,-2))
         // The clearly labelled advertising placement belongs INSIDE the player frame.
         advertising=AdvertisementBanner(this)
@@ -442,8 +453,7 @@ class MainActivity:Activity() {
                     val uri=request?.url ?: return false
                     if(!request.isForMainFrame)return false
                     val host=uri.host.orEmpty().lowercase(Locale.ROOT)
-                    // Let our own short-series catalog and episode pages navigate inside WebView.
-                    if(host=="egyshow.com" || host=="www.egyshow.com")return false
+                    // Only YouTube URLs are allowed in fallback discovery.
                     if(!(host=="youtube.com" || host.endsWith(".youtube.com") || host=="youtu.be"))return true
                     val id=when {
                         host=="youtu.be" -> uri.lastPathSegment
@@ -869,7 +879,28 @@ class MainActivity:Activity() {
         }
     }
 
+    private fun showOfficialYoutubeFallback() {
+        val item=playingModel ?:return
+        val id=youtubeVideoId(item.url) ?:return
+        if(!isWatching || !this::youtubeOfficial.isInitialized || youtubeOfficial.isActive())return
+        panel.player.stop()
+        panel.root.visibility=View.GONE
+        sourceOptions.clear()
+        youtubeOfficial.root.visibility=View.VISIBLE
+        val success=youtubeOfficial.open(id)
+        if(!success) {
+            panel.root.visibility=View.VISIBLE
+            return
+        }
+        adjustNormalPlayerHeight()
+        if(this::watchNotice.isInitialized)watchNotice.visibility=View.GONE
+    }
     private fun openPlayer(model:VideoModel) {
+        if(model.isLive || model.url.contains("/live/")) {
+            Toast.makeText(this,"البث المباشر غير متاح في EGYTUBE",Toast.LENGTH_LONG).show()
+            return
+        }
+
         pipAuthorizedSource=model.url.matches(Regex("(?i)^https://[^\\s]+\\.(mp4|m3u8|mpd)(\\?[^\\s]*)?$"))
         // If a prior video is playing in the mini view, return the same video surface
         // to the standard player before beginning the selected video.
@@ -879,6 +910,8 @@ class MainActivity:Activity() {
             attachPlayerToHost()
             panel.setMiniMode(false)
         }
+        youtubeOfficial.close()
+        panel.root.visibility=View.VISIBLE
         playingModel=model
         shortSeriesSlider.root.visibility=View.GONE
         lastRecordedUrl=null
@@ -899,8 +932,9 @@ class MainActivity:Activity() {
         playerHost.visibility=View.VISIBLE
         playerDetails.visibility=View.VISIBLE
         playerDetails.removeAllViews()
-        watchNotice=baseText("جارٍ تجهيز الفيديو...",12f,false,Palette.SECOND).apply {
-            setPadding(0,dp(5),0,dp(9))
+        watchNotice=baseText("",12f,false,Palette.SECOND).apply {
+            visibility=View.GONE
+            setPadding(0,dp(5),0,dp(6))
         }
         val name=baseText(model.title,18f,true).apply { maxLines=3 }
         playerDetails.addView(name)
@@ -952,7 +986,7 @@ class MainActivity:Activity() {
         playerDetails.addView(watchNotice)
         sectionTitle.text="قد يعجبك أيضًا"
         sectionTitle.visibility=View.GONE
-        watchNotice.text="جارٍ تجهيز المشغل..."
+        watchNotice.visibility=View.GONE
         status.visibility=View.GONE
         moreButton.visibility=View.GONE
         list.scrollToPosition(0)
@@ -974,6 +1008,8 @@ class MainActivity:Activity() {
             try {
                 val info=StreamInfo.getInfo(model.url)
                 if(info.ageLimit>0) throw IllegalStateException("الفيديو مقيّد بالعمر")
+                if(info.streamType.toString().contains("LIVE",true))
+                    throw IllegalStateException("البث المباشر غير متاح في EGYTUBE")
                 val opts=mutableListOf<StreamChoice>()
                 info.videoStreams.filter { it.isUrl && it.content.startsWith("https://") }
                     .sortedByDescending { it.height }
@@ -991,11 +1027,19 @@ class MainActivity:Activity() {
                     if(isDestroyed || token!=currentToken || !isWatching)return@runOnUiThread
                     panel.setTitle(info.name)
                     sourceOptions.clear();sourceOptions.addAll(opts)
-                    if(opts.isEmpty())status.text="لم يُعثر على مصدر تشغيل متاح لهذا الفيديو."
+                    if(opts.isEmpty())showOfficialYoutubeFallback()
                     else selectQuality(0)
                 }
             } catch(e:Exception) {
-                runOnUiThread { if(token==currentToken)status.text="تعذّر فتح الفيديو: "+(e.message?:"غير معروف") }
+                runOnUiThread {
+                    if(token!=currentToken || !isWatching)return@runOnUiThread
+                    if(e.message?.contains("مقيّد بالعمر")==true || e.message?.contains("البث المباشر")==true){
+                        watchNotice.text=e.message
+                        watchNotice.visibility=View.VISIBLE
+                        return@runOnUiThread
+                    }
+                    showOfficialYoutubeFallback()
+                }
             }
         }
     }
@@ -1015,7 +1059,7 @@ class MainActivity:Activity() {
     }
     private fun shareLink(item:VideoModel):String {
         val id=youtubeVideoId(item.url)
-        return if(id==null)item.url else "https://egyshow.com/watch?egy="+id
+        return if(id==null)item.url else "https://www.youtube.com/watch?v="+id
     }
     private fun copyActiveVideoLink() {
         val item=playingModel ?:return
@@ -1120,6 +1164,26 @@ class MainActivity:Activity() {
     }
     private fun leavePlayer() {
         if(!isWatching)return
+        if(youtubeOfficial.hasFullScreen()){youtubeOfficial.exitFullScreen();return}
+        if(youtubeOfficial.isActive()) {
+            ++currentToken
+            youtubeOfficial.close()
+            panel.root.visibility=View.VISIBLE
+            panel.player.stop()
+            isWatching=false
+            playingModel=null
+            playerHost.visibility=View.GONE
+            playerDetails.visibility=View.GONE
+            categories.visibility=View.VISIBLE
+            sectionTitle.visibility=View.VISIBLE
+            status.visibility=View.VISIBLE
+            searchTools.visibility=View.VISIBLE
+            shortSeriesSlider.root.visibility=if(customTerm.isNullOrBlank())View.VISIBLE else View.GONE
+            webResults.visibility=if(webMode)View.VISIBLE else View.GONE
+            list.visibility=if(webMode)View.GONE else View.VISIBLE
+            moreButton.visibility=if(nextPage!=null)View.VISIBLE else View.GONE
+            return
+        }
         if(panel.exitFullIfNeeded())return
         if(playingModel!=null && panel.player.mediaItemCount>0) {
             miniActive=true
@@ -1276,6 +1340,10 @@ class MainActivity:Activity() {
     }
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if(this::youtubeOfficial.isInitialized && youtubeOfficial.hasFullScreen()) {
+            youtubeOfficial.exitFullScreen()
+            return
+        }
         if(isWatching)leavePlayer()
         else if(webMode) {
             if(webResults.canGoBack())webResults.goBack()
@@ -1289,6 +1357,7 @@ class MainActivity:Activity() {
         if(this::shortSeriesSlider.isInitialized)shortSeriesSlider.close()
         worker.shutdownNow()
         panel.release()
+        youtubeOfficial.dispose()
         advertising.dispose()
         webResults.destroy()
         super.onDestroy()
