@@ -1,7 +1,7 @@
 name: Build Personal YT Player APK
 on:
   push:
-    branches: [egytube-youtube-shortdramas-v039]
+    branches: [egytube-standalone-restored-v047]
   workflow_dispatch:
 permissions:
   contents: read
@@ -55,8 +55,8 @@ jobs:
                   applicationId = "com.personal.ytplayer"
                   minSdk = 26
                   targetSdk = 35
-                  versionCode = 12
-                  versionName = "0.3.9"
+                  versionCode = 13
+                  versionName = "0.4.0"
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -90,12 +90,7 @@ jobs:
                           <category android:name="android.intent.category.DEFAULT"/>
                           <data android:mimeType="text/plain"/>
                       </intent-filter>
-                      <intent-filter>
-                          <action android:name="android.intent.action.VIEW"/>
-                          <category android:name="android.intent.category.DEFAULT"/>
-                          <category android:name="android.intent.category.BROWSABLE"/>
-                          <data android:scheme="https" android:host="egyshow.com" android:path="/watch"/>
-                      </intent-filter>
+
                   </activity>
               </application>
           </manifest>
@@ -484,6 +479,6 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: EGYTUBE-v0.3.9-debug-apk
+          name: EGYTUBE-v0.4.0-standalone-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
