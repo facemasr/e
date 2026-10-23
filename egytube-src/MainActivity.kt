@@ -897,22 +897,24 @@ class MainActivity:Activity() {
         playerDetails.addView(baseText(model.channel +
             (if(model.views>=0) "  •  "+Palette.count(model.views)+" مشاهدة" else ""),
             13f,false,Palette.SECOND).apply {setPadding(0,dp(6),0,dp(6))})
-        val actions=LinearLayout(this).apply {
-            orientation=LinearLayout.HORIZONTAL
-            gravity=Gravity.CENTER_VERTICAL
+        val actions=HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled=false
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
         }
-        actions.addView(clickable("مشاركة ↗") {
-            val intent=Intent(Intent.ACTION_SEND).apply {
-                type="text/plain";putExtra(Intent.EXTRA_TEXT,model.url)
-            }
-            startActivity(Intent.createChooser(intent,"مشاركة الفيديو"))
-        })
-        actions.addView(clickable("نسخ الرابط") {
-            (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                .setPrimaryClip(ClipData.newPlainText("رابط الفيديو",model.url))
-            Toast.makeText(this,"تم نسخ الرابط",Toast.LENGTH_SHORT).show()
-        },LinearLayout.LayoutParams(-2,-2).apply {leftMargin=dp(10)})
-        playerDetails.addView(actions)
+        val row=LinearLayout(this).apply {
+            orientation=LinearLayout.HORIZONTAL
+            layoutDirection=View.LAYOUT_DIRECTION_RTL
+            gravity=Gravity.CENTER_VERTICAL
+            setPadding(0,dp(6),0,dp(6))
+        }
+        row.addView(clickable("↗  مشاركة",{shareActiveVideo()}),
+            LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
+        row.addView(clickable("⧉  نسخ الرابط",{copyActiveVideoLink()}),
+            LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
+        row.addView(clickable("↓  تحميل",{downloadActiveVideo()}),
+            LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
+        actions.addView(row)
+        playerDetails.addView(actions,LinearLayout.LayoutParams(-1,dp(62)))
         val relatedChips=HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled=false
         }
@@ -988,11 +990,35 @@ class MainActivity:Activity() {
         }
     }
 
+    private fun youtubeVideoId(link:String):String? {
+        val uri=try {Uri.parse(link)} catch(_:Exception) {return null}
+        val host=uri.host.orEmpty().lowercase(Locale.ROOT)
+        if(host!="youtube.com" && !host.endsWith(".youtube.com") && host!="youtu.be")return null
+        val id=when {
+            host=="youtu.be" -> uri.pathSegments.firstOrNull()
+            uri.path.orEmpty().startsWith("/shorts/") -> uri.pathSegments.getOrNull(1)
+            uri.path.orEmpty().startsWith("/live/") -> uri.pathSegments.getOrNull(1)
+            uri.path.orEmpty().startsWith("/embed/") -> uri.pathSegments.getOrNull(1)
+            else -> uri.getQueryParameter("v")
+        }
+        return id?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{11}")) }
+    }
+    private fun shareLink(item:VideoModel):String {
+        val id=youtubeVideoId(item.url)
+        return if(id==null)item.url else "https://egyshow.com/watch?egy="+id
+    }
+    private fun copyActiveVideoLink() {
+        val item=playingModel ?:return
+        val value=shareLink(item)
+        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+            .setPrimaryClip(ClipData.newPlainText("EGYTUBE video link",value))
+        Toast.makeText(this,"تم نسخ رابط المشاركة",Toast.LENGTH_SHORT).show()
+    }
     private fun shareActiveVideo() {
         val item=playingModel ?:return
         val intent=Intent(Intent.ACTION_SEND).apply {
             type="text/plain"
-            putExtra(Intent.EXTRA_TEXT,item.title+"\n"+item.url)
+            putExtra(Intent.EXTRA_TEXT,item.title+"\n"+shareLink(item))
         }
         startActivity(Intent.createChooser(intent,"مشاركة الفيديو"))
     }
