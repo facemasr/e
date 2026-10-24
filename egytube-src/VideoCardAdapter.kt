@@ -83,7 +83,8 @@ internal object Thumbnails {
 
 internal class VideoCardAdapter(
     private val activity: Activity,
-    private val onClick:(VideoModel)->Unit
+    private val onClick:(VideoModel)->Unit,
+    private val onChannel:(String)->Unit = {}
 ): RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     private val slotAds=mutableListOf<AdvertisementBanner>()
     private val rectIndex=5
@@ -222,6 +223,8 @@ internal class VideoCardAdapter(
         Thumbnails.show(h.cover,video.thumbnail)
         Thumbnails.show(h.avatar,video.avatar)
         h.itemView.setOnClickListener { onClick(video) }
+        h.details.setOnClickListener { if(video.channel.isNotBlank())onChannel(video.channel) }
+        h.avatar.setOnClickListener { if(video.channel.isNotBlank())onChannel(video.channel) }
         h.more.setOnClickListener {
             android.app.AlertDialog.Builder(activity).setItems(arrayOf("تشغيل الفيديو","نسخ رابط الفيديو","حفظ للمشاهدة لاحقًا","متابعة القناة محليًا")) { _,which ->
                 when(which) {
