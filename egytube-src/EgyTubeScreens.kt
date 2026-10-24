@@ -41,9 +41,9 @@ internal object EgyTubeScreens {
         body.addView(label(a,title,28f,true),LinearLayout.LayoutParams(-1,dp(a,55)))
         build(body)
         return ScrollView(a).apply {
-            fillViewport=true
+            isFillViewport=true
             setBackgroundColor(Palette.BG)
-            addView(body,ScrollView.LayoutParams(-1,-2))
+            addView(body,FrameLayout.LayoutParams(-1,-2))
         }
     }
     private fun section(a:Activity,parent:LinearLayout,title:String) {
