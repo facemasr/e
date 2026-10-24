@@ -83,7 +83,8 @@ internal object Thumbnails {
 
 internal class VideoCardAdapter(
     private val activity: Activity,
-    private val onClick:(VideoModel)->Unit
+    private val onClick:(VideoModel)->Unit,
+    private val onChannel:(String)->Unit = {}
 ): RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     private val slotAds=mutableListOf<AdvertisementBanner>()
     private val rectIndex=5
@@ -123,13 +124,14 @@ internal class VideoCardAdapter(
         }
         val outer=LinearLayout(activity).apply {
             orientation=LinearLayout.VERTICAL
-            setPadding(0,dp(6),0,dp(16))
+            setPadding(dp(12),dp(9),dp(12),dp(16))
             setBackgroundColor(Color.WHITE)
         }
         val width=activity.resources.displayMetrics.widthPixels
         val imgHeight = width * 9 / 16
         val frame=FrameLayout(activity).apply {
-            setBackgroundColor(Palette.SURFACE)
+            background=Palette.round(Palette.SURFACE,dp(15).toFloat())
+            clipToOutline=true
         }
         val cover=ImageView(activity).apply {
             scaleType=ImageView.ScaleType.CENTER_CROP
@@ -146,12 +148,21 @@ internal class VideoCardAdapter(
         frame.addView(duration,FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM or Gravity.END).apply {
             bottomMargin=dp(9); rightMargin=dp(9)
         })
-        outer.addView(frame,LinearLayout.LayoutParams(-1,imgHeight))
+        val playOverlay=TextView(activity).apply {
+            text="▶"
+            gravity=Gravity.CENTER
+            textSize=19f
+            setTextColor(Color.WHITE)
+            background=Palette.round(0x990b1016.toInt(),dp(32).toFloat())
+            contentDescription="تشغيل الفيديو"
+        }
+        frame.addView(playOverlay,FrameLayout.LayoutParams(dp(48),dp(48),Gravity.CENTER))
+        outer.addView(frame,LinearLayout.LayoutParams(-1,imgHeight-dp(14)))
         val info=LinearLayout(activity).apply {
             orientation=LinearLayout.HORIZONTAL
             gravity=Gravity.TOP
             layoutDirection=View.LAYOUT_DIRECTION_RTL
-            setPadding(dp(13),dp(11),dp(12),dp(12))
+            setPadding(dp(1),dp(12),dp(1),dp(10))
         }
         val avatarFrame=FrameLayout(activity).apply {
             background=Palette.round(0xffe6e7ec.toInt(), dp(40).toFloat())
@@ -192,8 +203,7 @@ internal class VideoCardAdapter(
         }
         info.addView(more, LinearLayout.LayoutParams(dp(26),dp(45)))
         outer.addView(info)
-        outer.addView(View(activity).apply {setBackgroundColor(0xfff1f1f1.toInt())},
-            LinearLayout.LayoutParams(-1,dp(1)))
+        
         return Holder(outer,cover,avatar,name,details,duration,more)
     }
     override fun onBindViewHolder(holder:RecyclerView.ViewHolder,position:Int) {
@@ -213,6 +223,8 @@ internal class VideoCardAdapter(
         Thumbnails.show(h.cover,video.thumbnail)
         Thumbnails.show(h.avatar,video.avatar)
         h.itemView.setOnClickListener { onClick(video) }
+        h.details.setOnClickListener { if(video.channel.isNotBlank())onChannel(video.channel) }
+        h.avatar.setOnClickListener { if(video.channel.isNotBlank())onChannel(video.channel) }
         h.more.setOnClickListener {
             android.app.AlertDialog.Builder(activity).setItems(arrayOf("تشغيل الفيديو","نسخ رابط الفيديو","حفظ للمشاهدة لاحقًا","متابعة القناة محليًا")) { _,which ->
                 when(which) {
