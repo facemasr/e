@@ -128,6 +128,13 @@ class MainActivity:Activity() {
         }catch(_:Exception){}
     }
     private lateinit var footer:LinearLayout
+    private lateinit var customPage:View
+    private lateinit var heroCard:FrameLayout
+    private lateinit var heroCover:ImageView
+    private lateinit var heroTitle:TextView
+    private var heroVideo:VideoModel?=null
+    private var activeTab="home"
+    private val footerSlots=mutableMapOf<String,Pair<TextView,TextView>>()
     private lateinit var moreButton:TextView
     private var currentToken=0
     private var currentExtractor:ListExtractor<out InfoItem>?=null
@@ -159,6 +166,11 @@ class MainActivity:Activity() {
     private fun recordWatching(model:VideoModel) {
         if(lastRecordedUrl==model.url)return
         lastRecordedUrl=model.url
+        val library=getSharedPreferences("egytube_library",0)
+        val previous=library.getString("history_urls","").orEmpty()
+            .split("\n").filter{it.isNotBlank() && it!=model.url}
+        library.edit().putString("history_urls",
+            (listOf(model.url)+previous).take(40).joinToString("\n")).apply()
         val category=categoryOf(model)
         val preferences=getSharedPreferences("egytube_interests",0)
         preferences.edit().putInt("total",preferences.getInt("total",0)+1)
@@ -345,13 +357,39 @@ class MainActivity:Activity() {
                 }
             }).apply {
                 if(selected) {
-                    background=Palette.round(0xff161616.toInt(),dp(17).toFloat())
+                    background=Palette.round(Palette.RED,dp(17).toFloat())
                     setTextColor(Color.WHITE)
                 }
             },LinearLayout.LayoutParams(-2,dp(40)).apply { rightMargin=dp(7) })
         }
         categories.addView(chips)
         root.addView(categories,LinearLayout.LayoutParams(-1,dp(49)))
+        heroCard=FrameLayout(this).apply {
+            background=Palette.round(Palette.SURFACE,dp(17).toFloat())
+            clipToOutline=true
+            visibility=View.GONE
+            setOnClickListener { heroVideo?.let{openPlayer(it)} }
+        }
+        heroCover=ImageView(this).apply {
+            scaleType=ImageView.ScaleType.CENTER_CROP
+        }
+        heroCard.addView(heroCover,FrameLayout.LayoutParams(-1,-1))
+        val heroShade=View(this).apply {
+            background=android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.BOTTOM_TOP,
+                intArrayOf(0xdd080808.toInt(),0x00000000)
+            )
+        }
+        heroCard.addView(heroShade,FrameLayout.LayoutParams(-1,-1))
+        heroTitle=baseText("",19f,true,Color.WHITE).apply {
+            maxLines=2
+            setPadding(dp(17),dp(9),dp(17),dp(15))
+            gravity=Gravity.RIGHT
+        }
+        heroCard.addView(heroTitle,FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM))
+        root.addView(heroCard,LinearLayout.LayoutParams(-1,dp(186)).apply{
+            leftMargin=dp(12);rightMargin=dp(12);topMargin=dp(3);bottomMargin=dp(7)
+        })
         shortSeriesSlider=ShortSeriesCarousel(this,
             { video -> openPlayer(video) },
             {
@@ -446,7 +484,7 @@ class MainActivity:Activity() {
             setHasFixedSize(false)
             clipToPadding=false
         }
-        adapter=VideoCardAdapter(this,{ video -> openPlayer(video) })
+        adapter=VideoCardAdapter(this,{ video -> openPlayer(video) },{ channel -> showChannel(channel) })
         list.adapter=adapter
         list.addOnScrollListener(object:RecyclerView.OnScrollListener() {
             override fun onScrolled(view:RecyclerView,dx:Int,dy:Int) {
@@ -455,6 +493,8 @@ class MainActivity:Activity() {
                 if(manager.findLastVisibleItemPosition() >= adapter.itemCount - 5) loadMore()
             }
         })
+        customPage=View(this).apply{visibility=View.GONE}
+        root.addView(customPage,LinearLayout.LayoutParams(-1,0,1f))
         root.addView(list,LinearLayout.LayoutParams(-1,0,1f))
         webResults = WebView(this).apply {
             visibility=View.GONE
@@ -500,22 +540,28 @@ class MainActivity:Activity() {
             setBackgroundColor(Color.WHITE)
             elevation=dp(6).toFloat()
         }
-        fun tab(icon:String,name:String,go:()->Unit) {
+        footerSlots.clear()
+        fun tab(icon:String,name:String,key:String,go:()->Unit) {
             val cell=LinearLayout(this).apply {
                 orientation=LinearLayout.VERTICAL
                 gravity=Gravity.CENTER
                 setOnClickListener {go()}
+                isFocusable=true
+                contentDescription=name
             }
-            cell.addView(baseText(icon,24f,true).apply {gravity=Gravity.CENTER},
-                LinearLayout.LayoutParams(-1,dp(28)))
-            cell.addView(baseText(name,11f).apply {gravity=Gravity.CENTER},
-                LinearLayout.LayoutParams(-1,dp(22)))
+            val glyph=baseText(icon,22f,true).apply {gravity=Gravity.CENTER}
+            val caption=baseText(name,10.5f).apply {gravity=Gravity.CENTER}
+            cell.addView(glyph,LinearLayout.LayoutParams(-1,dp(28)))
+            cell.addView(caption,LinearLayout.LayoutParams(-1,dp(23)))
+            footerSlots[key]=glyph to caption
             footer.addView(cell,LinearLayout.LayoutParams(0,dp(61),1f))
         }
-        tab("⌂","الرئيسية"){if(isWatching)leavePlayer();loadTrending()}
-        tab("▤","Shorts"){if(isWatching)leavePlayer();showShorts()}
-        tab("≡","الاشتراكات"){if(isWatching)leavePlayer();showSubscriptions()}
-        tab("◉","أنت"){if(isWatching)leavePlayer();showLibrary()}
+        tab("⌂","الرئيسية","home"){if(isWatching)leavePlayer();loadTrending()}
+        tab("▶","المقاطع القصيرة","shorts"){if(isWatching)leavePlayer();showShorts()}
+        tab("▣","الاشتراكات","subscriptions"){if(isWatching)leavePlayer();showSubscriptions()}
+        tab("▤","المكتبة","library"){if(isWatching)leavePlayer();showLibrary()}
+        tab("◉","حسابي","profile"){if(isWatching)leavePlayer();showProfile()}
+        refreshFooter()
         root.addView(footer,LinearLayout.LayoutParams(-1,dp(64)))
         // A stable full-window stage keeps a floating in-app mini-player and PiP surface.
         screen=FrameLayout(this).apply {setBackgroundColor(Palette.BG)}
@@ -577,6 +623,62 @@ class MainActivity:Activity() {
         }
     }
 
+    private fun refreshFooter() {
+        footerSlots.forEach{(key,views)->
+            val tint=if(key==activeTab)Palette.RED else Palette.SECOND
+            views.first.setTextColor(tint)
+            views.second.setTextColor(tint)
+        }
+    }
+    private fun showFeedLayout() {
+        activeTab="home"
+        customPage.visibility=View.GONE
+        list.visibility=View.VISIBLE
+        categories.visibility=View.VISIBLE
+        sectionTitle.visibility=View.VISIBLE
+        status.visibility=View.VISIBLE
+        searchTools.visibility=View.VISIBLE
+        heroCard.visibility=if(heroVideo==null)View.GONE else View.VISIBLE
+        extraResults.visibility=View.GONE
+        refreshFooter()
+    }
+    private fun showCustomPage(page:View,key:String) {
+        if(isWatching)leavePlayer()
+        activeTab=key
+        root.removeView(customPage)
+        customPage=page
+        root.addView(customPage,root.indexOfChild(list),
+            LinearLayout.LayoutParams(-1,0,1f))
+        customPage.visibility=View.VISIBLE
+        list.visibility=View.GONE
+        webResults.visibility=View.GONE
+        categories.visibility=View.GONE
+        heroCard.visibility=View.GONE
+        searchRow.visibility=View.GONE
+        shortSeriesSlider.root.visibility=View.GONE
+        homeWideAd.hidePlacement()
+        sectionTitle.visibility=View.GONE
+        status.visibility=View.GONE
+        searchTools.visibility=View.GONE
+        extraResults.visibility=View.GONE
+        moreButton.visibility=View.GONE
+        refreshFooter()
+    }
+    private fun showProfile() {
+        showCustomPage(EgyTubeScreens.profile(this),"profile")
+    }
+    private fun showChannel(name:String) {
+        showCustomPage(EgyTubeScreens.channel(this,name,cachedVideos.toList(),
+            {video->openPlayer(video)},{
+                val prefs=getSharedPreferences("egytube_library",0)
+                val followed=prefs.getStringSet("followed_channels",emptySet()).orEmpty().toMutableSet()
+                followed.add(name)
+                prefs.edit().putStringSet("followed_channels",followed).apply()
+                Toast.makeText(this,"تمت متابعة "+name+" محليًا",Toast.LENGTH_SHORT).show()
+                showSubscriptions()
+            }),"channel")
+    }
+
     override fun onNewIntent(intent:Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -587,6 +689,17 @@ class MainActivity:Activity() {
     }
     private fun showSearch() {
         if(isWatching)leavePlayer()
+        activeTab="search"
+        customPage.visibility=View.GONE
+        list.visibility=View.VISIBLE
+        heroCard.visibility=View.GONE
+        shortSeriesSlider.root.visibility=View.GONE
+        homeWideAd.hidePlacement()
+        sectionTitle.visibility=View.VISIBLE
+        status.visibility=View.VISIBLE
+        searchTools.visibility=View.VISIBLE
+        moreButton.visibility=if(nextPage==null)View.GONE else View.VISIBLE
+        refreshFooter()
         searchRow.visibility=View.VISIBLE
         searchBox.requestFocus()
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
@@ -621,48 +734,25 @@ class MainActivity:Activity() {
             }.show()
     }
     private fun showShorts() {
-        searchRow.visibility=View.VISIBLE
-        searchBox.setText("Shorts")
+        activeTab="shorts"
+        searchBox.setText("#shorts")
         search()
-        sectionTitle.text="استكشاف Shorts"
+        showCustomPage(EgyTubeScreens.shorts(this,cachedVideos.toList(),
+            {video->openPlayer(video)}),"shorts")
     }
     private fun showSubscriptions() {
         val followed=getSharedPreferences("egytube_library",0)
             .getStringSet("followed_channels",emptySet()).orEmpty()
-        val matched=cachedVideos.filter { followed.contains(it.channel) }
-        if(matched.isEmpty()) {
-            android.app.AlertDialog.Builder(this).setTitle("الاشتراكات المحلية")
-                .setMessage("لم تتبع قنوات بعد. يمكنك متابعة قناة من قائمة الفيديو. هذه قائمة محلية داخل EGYTUBE، وليست مرتبطة بحساب يوتيوب.")
-                .setPositiveButton("حسنًا",null).show()
-        } else {
-            adapter.replaceAll(matched)
-            sectionTitle.text="قنواتك المتابعة محليًا"
-        }
+        showCustomPage(EgyTubeScreens.subscriptions(this,followed,cachedVideos.toList(),
+            {video->openPlayer(video)},{name->showChannel(name)}),"subscriptions")
     }
     private fun showLibrary() {
-        val urls=getSharedPreferences("egytube_library",0)
-            .getStringSet("saved_urls",emptySet()).orEmpty()
-        val matches=cachedVideos.filter {urls.contains(it.url)}
-        val terms=getSharedPreferences("egytube_search",0)
-            .getString("terms","").orEmpty().split("\n").filter {it.isNotBlank()}
-        android.app.AlertDialog.Builder(this).setTitle("مكتبتك")
-             .setItems(arrayOf("المشاهدة لاحقًا ("+urls.size+")","عمليات البحث السابقة","إدارة التنزيلات")){_,index->
-                if(index==0) {
-                    adapter.replaceAll(matches)
-                    sectionTitle.text="المشاهدة لاحقًا"
-                    status.text=if(matches.isEmpty()) "لا توجد فيديوهات محفوظة ضمن الصفحة المحمّلة حاليًا."
-                        else "فيديوهات محفوظة: "+matches.size
-                } else if(index==2) {
-                    DownloadCenter.show(this)
-                } else {
-                    android.app.AlertDialog.Builder(this).setTitle("بحث سابق")
-                        .setItems(terms.take(12).toTypedArray()){_,which->
-                            if(which in terms.indices) {
-                                searchBox.setText(terms[which]);search()
-                            }
-                        }.show()
-                }
-            }.show()
+        val library=getSharedPreferences("egytube_library",0)
+        val saved=library.getStringSet("saved_urls",emptySet()).orEmpty()
+        val watched=library.getString("history_urls","").orEmpty()
+            .split("\n").filter{it.isNotBlank()}.toSet()
+        showCustomPage(EgyTubeScreens.library(this,cachedVideos.toList(),saved,watched,
+            {video->openPlayer(video)},{DownloadCenter.show(this)}),"library")
     }
     private fun chooseType() {
         val values=arrayOf("الكل","فيديوهات","مباشر","القنوات","قوائم التشغيل")
@@ -708,6 +798,18 @@ class MainActivity:Activity() {
         }
         if(!isWatching && customTerm.isNullOrBlank()) sectionTitle.text=homeTitle()
         adapter.replaceAll(sorted)
+        if(activeTab=="home" && customTerm.isNullOrBlank()) {
+            heroVideo=sorted.firstOrNull()
+            if(heroVideo!=null) {
+                heroTitle.text="▶  "+heroVideo!!.title
+                Thumbnails.show(heroCover,heroVideo!!.thumbnail)
+                heroCard.visibility=View.VISIBLE
+            } else heroCard.visibility=View.GONE
+        } else heroCard.visibility=View.GONE
+        if(activeTab=="shorts") {
+            showCustomPage(EgyTubeScreens.shorts(this,sorted,
+                {video->openPlayer(video)}),"shorts")
+        }
         extraRow.removeAllViews()
         val extra=extraItems.filter{
             when(typeFilter) {
@@ -781,6 +883,8 @@ class MainActivity:Activity() {
         list.visibility=View.VISIBLE
     }
     private fun loadTrending() {
+        showFeedLayout()
+        heroCard.visibility=View.GONE
         homeWideAd.display()
         shortSeriesSlider.root.visibility=View.VISIBLE
         categories.visibility=View.VISIBLE
@@ -826,6 +930,14 @@ class MainActivity:Activity() {
         }
     }
     private fun search() {
+        if(activeTab!="shorts") {
+            customPage.visibility=View.GONE
+            list.visibility=View.VISIBLE
+            sectionTitle.visibility=View.VISIBLE
+            status.visibility=View.VISIBLE
+            searchTools.visibility=View.VISIBLE
+        }
+        heroCard.visibility=View.GONE
         homeWideAd.hidePlacement()
         shortSeriesSlider.root.visibility=View.GONE
         val term=searchBox.text.toString().trim()
@@ -931,6 +1043,8 @@ class MainActivity:Activity() {
         youtubeFallbackActive=false
         panel.root.visibility=View.VISIBLE
         playingModel=model
+        customPage.visibility=View.GONE
+        heroCard.visibility=View.GONE
         homeWideAd.hidePlacement()
         shortSeriesSlider.root.visibility=View.GONE
         lastRecordedUrl=null
@@ -957,6 +1071,7 @@ class MainActivity:Activity() {
         }
         val name=baseText(model.title,18f,true).apply { maxLines=3 }
         playerDetails.addView(name)
+        name.setOnClickListener { if(model.channel.isNotBlank())showChannel(model.channel) }
         playerDetails.addView(baseText(model.channel +
             (if(model.views>=0) "  •  "+Palette.count(model.views)+" مشاهدة" else ""),
             13f,false,Palette.SECOND).apply {setPadding(0,dp(6),0,dp(6))})
@@ -970,6 +1085,20 @@ class MainActivity:Activity() {
             gravity=Gravity.CENTER_VERTICAL
             setPadding(0,dp(6),0,dp(6))
         }
+        row.addView(clickable("♡  إعجاب",{
+            val prefs=getSharedPreferences("egytube_library",0)
+            val liked=prefs.getStringSet("liked_urls",emptySet()).orEmpty().toMutableSet()
+            if(!liked.add(model.url))liked.remove(model.url)
+            prefs.edit().putStringSet("liked_urls",liked).apply()
+            Toast.makeText(this,if(model.url in liked)"أعجبك الفيديو" else "أُزيل الإعجاب",Toast.LENGTH_SHORT).show()
+        }),LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
+        row.addView(clickable("▣  حفظ",{
+            val prefs=getSharedPreferences("egytube_library",0)
+            val saved=prefs.getStringSet("saved_urls",emptySet()).orEmpty().toMutableSet()
+            saved.add(model.url)
+            prefs.edit().putStringSet("saved_urls",saved).apply()
+            Toast.makeText(this,"تم حفظ الفيديو للمشاهدة لاحقًا",Toast.LENGTH_SHORT).show()
+        }),LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
         row.addView(clickable("↗  مشاركة",{shareActiveVideo()}),
             LinearLayout.LayoutParams(-2,dp(46)).apply {rightMargin=dp(8)})
         row.addView(clickable("⧉  نسخ الرابط",{copyActiveVideoLink()}),
