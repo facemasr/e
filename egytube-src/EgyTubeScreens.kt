@@ -207,11 +207,11 @@ internal object EgyTubeScreens {
     fun shorts(a:Activity,items:List<VideoModel>,play:(VideoModel)->Unit):View =
         page(a,"المقاطع القصيرة") {body->
             val shorts=items.filter{
-                it.duration in 1..180 || it.title.contains("shorts",true) ||
+                it.duration in 1L..180L || it.title.contains("shorts",true) ||
                     it.title.contains("#short",true) || it.title.contains("قصير")
             }.take(15)
             if(shorts.isEmpty()) {
-                action(a,body,"ابحث عن Shorts","لا توجد مقاطع قصيرة ضمن الفيديوهات الحالية") {}
+                body.addView(label(a,"جارٍ عرض المقاطع القصيرة المتاحة...",13f,false,true))
             }
             shorts.forEach{video->
                 val poster=FrameLayout(a).apply {
